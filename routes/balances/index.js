@@ -1,5 +1,7 @@
 'use strict'
 
+const { getBalanceQuery } = require('../../common')
+
 const PRICE_CACHE = new Map()
 
 module.exports = async function (fastify, opts) {
@@ -42,7 +44,6 @@ module.exports = async function (fastify, opts) {
       }
     },
     async function (request, reply) {
-      console.log(monthsAgo(1).toDateString())
       const client = await fastify.pg.connect()
       try {
         const [query, params] = getBalanceQuery(request.params.address, { from: request.query.from, to: request.query.to })
@@ -103,7 +104,6 @@ module.exports = async function (fastify, opts) {
         const values = Array.from(prices.entries()).map(([denom, value]) => `('${denom}', ${value?.price || 0}, ${value?.decimals || 18})`).join(', ');
 
         const [query, params] = getBalanceQuery(request.params.address, { from: request.query.from, to: request.query.to })
-
         const valueQuery = `
           WITH
             prices(denom, price, decimals) AS (VALUES ${values}),
@@ -117,7 +117,7 @@ module.exports = async function (fastify, opts) {
           GROUP BY day
           ORDER BY day DESC;
         `
-        console.log(valueQuery)
+
         const { rows } = await client.query(valueQuery, params)
         return { values: rows }
       } finally {
@@ -125,50 +125,6 @@ module.exports = async function (fastify, opts) {
       }
     }
   )
-}
-
-function monthsAgo(defaultFrom = 1) {
-  const now = new Date()
-  now.setMonth(now.getMonth() - defaultFrom)
-  return now
-}
-
-function getBalanceQuery(address, { denom = null, from = monthsAgo(1).toDateString(), to = monthsAgo(0).toDateString() }) {
-  const where = `WHERE address = $1`
-  const params = [address, from, to]
-  if (denom) {
-    where += ' AND denom = $4'
-    params.push(denom)
-  }
-
-  const query = `
-    SELECT
-      day,
-      denom,
-      COALESCE(ending_balance, 0) as ending_balance
-    FROM (
-      SELECT
-      time_bucket_gapfill('1 day', day) AS day,
-      denom,
-      locf(SUM(ending_balance)) AS ending_balance
-      FROM (
-        SELECT
-          day,
-          denom,
-          SUM(daily_delta) OVER (
-            PARTITION BY address, denom
-            ORDER BY day
-          ) AS ending_balance
-        FROM daily_balances
-        ${where}
-      ) ends
-      WHERE day >= '2019-01-01' -- must be from start of all data to carry-forward values properly
-      AND day <= $3
-      GROUP BY (time_bucket_gapfill('1 day', day), denom)
-    ) filled
-    WHERE day >= $2
-  `
-  return [query, params]
 }
 
 async function getTokenPrices() {
@@ -191,7 +147,6 @@ async function getTokenPrices() {
     console.error('Fetch error:', error);
   }
 }
-
 
 async function fetchTokenPrices() {
   const response = await fetch('https://hydrogen-api.carbon.network/tokens?limit=5000');
