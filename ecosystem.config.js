@@ -25,7 +25,7 @@ module.exports = {
       ref  : 'origin/master',
       repo : 'git@github.com:Switcheo/demex-insights.git',
       path : '/home/ubuntu/demex-insights',
-      'post-deploy' : './install-prod.sh && pm2 startOrReload ecosystem.config.js --env production',
+      'post-deploy' : './install-prod.sh',
     }
   }
 };

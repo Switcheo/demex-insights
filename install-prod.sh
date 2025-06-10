@@ -28,4 +28,6 @@ else
   exit 1
 fi
 
+pm2 startOrReload ecosystem.config.js --env production
+
 echo "Installed successfully"
