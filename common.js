@@ -1,5 +1,7 @@
+'use strict'
+
 // getBalanceQuery returns the query fragment for the daily ending balance of each denom for the given address
-export function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateString(), to = daysAgo(0).toDateString() }) {
+function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateString(), to = daysAgo(0).toDateString() }) {
   let where = `WHERE address = $1`
   const params = [address, from, to]
   if (denom) {
@@ -37,17 +39,24 @@ export function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDa
   return [query, params]
 }
 
-export function daysAgo(days = 7, from = today()) {
+function daysAgo(days = 7, from = today()) {
   const ago = new Date(from)
   ago.setDate(from.getDate() - days)
   return ago
 }
 
-export function today() {
+function today() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-export function removeTime(datetime) {
+function removeTime(datetime) {
   return new Date(datetime.getFullYear(), datetime.getMonth(), datetime.getDate());
+}
+
+module.exports = {
+  getBalanceQuery,
+  daysAgo,
+  today,
+  removeTime
 }
