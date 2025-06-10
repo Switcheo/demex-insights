@@ -1,7 +1,8 @@
-# Getting Started with [Fastify-CLI](https://www.npmjs.com/package/fastify-cli)
+# Demex Insights
+
 This project was bootstrapped with Fastify-CLI.
 
-## Available Scripts
+## Development
 
 In the project directory, you can run:
 
@@ -10,14 +11,24 @@ In the project directory, you can run:
 To start the app in dev mode.\
 Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
 
-### `npm start`
-
-For production mode
-
 ### `npm run test`
 
 Run the test cases.
 
-## Learn More
+### `npm start`
 
-To learn Fastify, check out the [Fastify documentation](https://fastify.dev/docs/latest/).
+To run in production mode.
+
+## Deployment
+
+Deployment is done through [PM2](https://pm2.keymetrics.io/docs/usage/pm2-doc-single-page/).
+
+Install it first with:
+
+```bash
+$ npm install pm2@latest -g
+# or
+$ yarn global add pm2
+```
+
+Deploy with `pm2 deploy production`
