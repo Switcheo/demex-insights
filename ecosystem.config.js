@@ -3,7 +3,7 @@ module.exports = {
     name: 'demex-insights',
     script: './node_modules/.bin/fastify',
     args: 'start -l info app.js',
-    instances: 'max ',
+    instances: '4',
     exec_mode: 'fork',
     env: {
       NODE_ENV: 'development',
