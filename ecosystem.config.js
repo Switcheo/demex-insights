@@ -3,7 +3,7 @@ module.exports = {
     name: 'demex-insights',
     script: './node_modules/.bin/fastify',
     args: 'start -l info app.js',
-    instances: 'max',
+    instances: 'max ',
     exec_mode: 'fork',
     env: {
       NODE_ENV: 'development',
@@ -25,9 +25,7 @@ module.exports = {
       ref  : 'origin/master',
       repo : 'git@github.com:Switcheo/demex-insights.git',
       path : '/home/ubuntu/demex-insights',
-      'pre-deploy-local': '',
-      'post-deploy' : 'npm install && pm2 reload ecosystem.config.js --env production',
-      'pre-setup': ''
+      'post-deploy' : './install-prod.sh && pm2 startOrReload ecosystem.config.js --env production',
     }
   }
 };
