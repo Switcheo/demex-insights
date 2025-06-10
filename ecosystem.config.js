@@ -4,7 +4,7 @@ module.exports = {
     script: './node_modules/.bin/fastify',
     args: 'start -l info app.js',
     instances: '4',
-    exec_mode: 'fork',
+    exec_mode: 'cluster',
     env: {
       NODE_ENV: 'development',
       PORT: 3000,
