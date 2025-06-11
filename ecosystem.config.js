@@ -12,6 +12,7 @@ module.exports = {
     env_production: {
       NODE_ENV: 'production',
       PORT: 30040,
+      FASTIFY_ADDRESS: '0.0.0.0',
     },
     watch: false,
     autorestart: true,
