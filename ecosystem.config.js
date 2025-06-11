@@ -13,6 +13,7 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: 30040,
       FASTIFY_ADDRESS: '0.0.0.0',
+      DATABASE_URL: 'postgres://ubuntu@localhost:5432/carbon-timescale-mainnet'
     },
     watch: false,
     autorestart: true,
