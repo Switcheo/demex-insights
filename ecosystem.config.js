@@ -1,3 +1,10 @@
+const dotenv = require('dotenv');
+const path = require('path');
+
+const env = process.env.NODE_ENV || 'development';
+const envPath = path.resolve(__dirname, `.env.${env}`);
+dotenv.config({ path: envPath });
+
 module.exports = {
   apps : [{
     name: 'demex-insights',
@@ -14,13 +21,13 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: 30310,
       FASTIFY_ADDRESS: '0.0.0.0',
-      DATABASE_URL: 'postgres://carboninsights@192.168.68.88:20009/carbon'
+      DATABASE_URL: process.env.DATABASE_URL,
     },
     env_production: {
       NODE_ENV: 'production',
       PORT: 30300,
       FASTIFY_ADDRESS: '0.0.0.0',
-      DATABASE_URL: 'postgres://carboninsights@192.168.68.89:10049/carbon'
+      DATABASE_URL: process.env.DATABASE_URL,
     },
     watch: false,
     autorestart: true,
