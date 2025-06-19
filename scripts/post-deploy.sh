@@ -28,6 +28,15 @@ else
   exit 1
 fi
 
+echo "Loading environment..."
+if [ -f "/etc/demex-insights/.env.$1.sh" ]; then
+  source "/etc/demex-insights/.env.$1.sh"
+  echo "Loaded environment"
+else
+  echo "Error: env file not found"
+  exit 1
+fi
+
 pm2 startOrReload ecosystem.config.js --env $1
 
 echo "Installed successfully"
