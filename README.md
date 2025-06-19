@@ -31,4 +31,6 @@ $ npm install pm2@latest -g
 $ yarn global add pm2
 ```
 
-Deploy with `pm2 deploy production`
+Deploy with `pm2 deploy production`.
+
+To set up a new environment, use `pm2 deploy <env> setup`

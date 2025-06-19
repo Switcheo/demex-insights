@@ -5,6 +5,7 @@ module.exports = {
     args: 'start -l info app.js',
     instances: '4',
     exec_mode: 'cluster',
+    append_env_to_name: true,
     env: {
       NODE_ENV: 'development',
       PORT: 3000,
@@ -32,7 +33,7 @@ module.exports = {
       port : '30000',
       ref  : 'origin/master',
       repo : 'git@github.com:Switcheo/demex-insights.git',
-      path : '/home/ubuntu/demex-insights',
+      path : '/home/ubuntu/demex-insights-staging',
       'post-deploy' : './scripts/post-deploy.sh staging',
     },
     production : {
