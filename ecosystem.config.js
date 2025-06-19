@@ -14,13 +14,13 @@ module.exports = {
       NODE_ENV: 'production',
       PORT: 30310,
       FASTIFY_ADDRESS: '0.0.0.0',
-      DATABASE_URL: 'postgres://carboninsights@192.168.68.88:5432/carbon'
+      DATABASE_URL: 'postgres://carboninsights@192.168.68.88:20009/carbon'
     },
     env_production: {
       NODE_ENV: 'production',
       PORT: 30300,
       FASTIFY_ADDRESS: '0.0.0.0',
-      DATABASE_URL: 'postgres://carboninsights@192.168.68.89:5432/carbon'
+      DATABASE_URL: 'postgres://carboninsights@192.168.68.89:10049/carbon'
     },
     watch: false,
     autorestart: true,
