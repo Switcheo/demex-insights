@@ -86,7 +86,7 @@ module.exports = async function (fastify, opts) {
 
         const initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
         const finalPrice = parseFloat(balances[balances.length - 1].ending_balance) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
-        const apr = (finalPrice - initialPrice) / days * 365
+        const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
         return { from, to, days, initialPrice, finalPrice, apr }
       } finally {
