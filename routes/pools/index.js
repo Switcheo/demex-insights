@@ -105,7 +105,7 @@ function addressHash(inputBytes) {
 }
 
 // Generates a Bech32-encoded address with dynamic prefix
-function generatePerpPoolAddress(poolId, prefix = 'swth') {
+function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 'swth')) {
   const input = Buffer.from(`${PerpsPoolVaultName}${poolId}`, 'utf8');
   const hashed = addressHash(input);
 
