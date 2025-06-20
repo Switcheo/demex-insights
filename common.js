@@ -18,7 +18,7 @@ function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateStrin
       SELECT
         time_bucket_gapfill('1 day', day) AS day,
         denom,
-        locf(SUM(ending_balance)) AS ending_balance
+        locf(AVG(ending_balance)) AS ending_balance
       FROM (
         SELECT
           day,

@@ -45,7 +45,7 @@ module.exports = async function (fastify, opts) {
         const sortedQuery = `
           SELECT
             day,
-            ending_balance * (10 ^ -18) AS ending_balance
+            ending_balance * (10 ^ -18)::decimal AS ending_balance
           FROM (
             ${query}
             ORDER BY day ASC
@@ -60,14 +60,14 @@ module.exports = async function (fastify, opts) {
           FROM (
             SELECT
             time_bucket_gapfill('1 day', day) AS day,
-            locf(SUM(ending_total_supply)) AS ending_total_supply
+            locf(AVG(ending_total_supply)) AS ending_total_supply
             FROM (
               SELECT
                 day,
                 SUM(daily_delta) OVER (
                   PARTITION BY denom
                   ORDER BY day
-                ) * (10 ^ -18) AS ending_total_supply
+                ) * (10 ^ -18)::decimal AS ending_total_supply
               FROM daily_balances
               WHERE denom = $1
             ) ends
@@ -84,11 +84,23 @@ module.exports = async function (fastify, opts) {
           throw new Error('Time frame needs to be > 1 day')
         }
 
+        if (balances.length === 0 || supplies.length === 0) {
+          throw new Error('Could not find pool')
+        }
+
+        if (balances[0].day.toString() !== supplies[0].day.toString()) {
+          throw new Error(`Found first balance ${balances[0].day} but first supply ${supplies[0].day}`)
+        }
+
+        if (balances[balances.length - 1].day.toString() !== supplies[supplies.length - 1].day.toString()) {
+          throw new Error(`Found first balance ${balances[balances.length - 1].day} but first supply ${supplies[supplies.length - 1].day}`)
+        }
+
         const initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
         const finalPrice = parseFloat(balances[balances.length - 1].ending_balance) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
-        return { from, to, days, initialPrice, finalPrice, apr }
+        return { id, address, from, to, days, initialPrice, finalPrice, apr }
       } finally {
         client.release()
       }
