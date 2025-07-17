@@ -23,6 +23,8 @@ module.exports = {
       FASTIFY_ADDRESS: '0.0.0.0',
       DATABASE_URL: process.env.DATABASE_URL || 'invalid DATABASE_URL',
       BECH32_PREFIX: 'swth',
+      HYDROGEN_BASE_URL: 'https://hydrogen-api.carbon.network',
+      RPC_BASE_URL: 'https://api.carbon.network',
     },
     watch: false,
     autorestart: true,

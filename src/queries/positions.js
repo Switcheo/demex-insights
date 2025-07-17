@@ -1,6 +1,6 @@
 'use strict'
 
-const { getTokenPrices } = require('./prices');
+const { getMarketPrices } = require('./prices');
 
 // getOpenPositions returns the currently open positions for the given address along with the position's underlying token denom
 async function getOpenPositions(client, address) {
@@ -8,7 +8,8 @@ async function getOpenPositions(client, address) {
     SELECT
       positions.entry_price * (10 ^ (markets.base_precision - markets.quote_precision)) AS entry_price,
       positions.lots * (10 ^ -markets.base_precision)::decimal AS lots,
-      markets.base AS token
+      markets.id AS market_id,
+      markets.base_precision - markets.quote_precision AS price_decimals
     FROM open_positions
     INNER JOIN positions ON positions.id = open_positions.id
     INNER JOIN markets ON markets.id = open_positions.market
@@ -21,16 +22,18 @@ async function getOpenPositions(client, address) {
 }
 
 async function getUnrealizedPnl(client, address) {
-  const prices = await getTokenPrices()
+  const prices = await getMarketPrices()
   const positions = await getOpenPositions(client, address)
 
   let upnl = 0.0
   for (const p of positions) {
-    const mark_price = prices.get(p['token'])
+    const raw_price = prices.get(p['market_id'])
 
-    if (!mark_price || !mark_price.price) continue
+    if (!raw_price) continue
 
-    upnl += parseFloat(p['lots']) * (parseFloat(mark_price.price) - parseFloat(p['entry_price']))
+    const mark_price = parseFloat(raw_price) * (10 ** parseInt(p['price_decimals'], 10))
+
+    upnl += parseFloat(p['lots']) * (mark_price - parseFloat(p['entry_price']))
   }
 
   return upnl
