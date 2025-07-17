@@ -116,6 +116,86 @@ module.exports = async function (fastify, opts) {
       }
     }
   )
+
+
+  fastify.get('/performance/:id', {
+  }, async function (request, reply) {
+    return {}
+  })
+
+  fastify.get('/24h_volume/:id', {
+     schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' }
+          },
+          additionalProperties: false
+        },
+        response: {
+          200: {
+            type: 'object',
+            required: ['id', 'address', 'taker_amount', 'maker_amount', 'total_amount'],
+            properties: {
+              id: { type: 'string' },
+              address: { type: 'string' },
+              taker_amount: { type: 'number' },
+              maker_amount: { type: 'number' },
+              total_amount: { type: 'number' },
+            },
+            additionalProperties: false
+          }
+        }
+      }
+  }, async function (request, reply) {
+      const client = await fastify.pg.connect()
+      try {
+        const { id } = request.params
+        const address = generatePerpPoolAddress(id)
+        const query = `
+          SELECT
+            SUM(maker_amount) AS maker_amount,
+            SUM(taker_amount) AS taker_amount,
+            SUM(maker_amount) + SUM(taker_amount) AS total_amount
+          FROM (
+            SELECT
+              SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount,
+              0 AS taker_amount
+            FROM archived_trades
+            WHERE
+              block_created_at > NOW() - INTERVAL '24 hours'
+              AND maker_address = $1
+            GROUP BY maker_address
+
+            UNION
+
+            SELECT
+              0 AS maker_amount,
+              SUM(quantity * price) * (10 ^ -18)::decimal AS taker_amount
+            FROM archived_trades
+            WHERE
+              block_created_at > NOW() - INTERVAL '24 hours'
+              AND taker_address = $1
+            GROUP BY taker_address
+          ) combined
+          ;
+        `
+        const { rows } = await client.query(query, [address])
+
+        return { id, address, ...rows[0]}
+      } finally {
+        client.release()
+      }
+  })
 }
 
 const PerpsPoolVaultName = 'perps_pool_vault';
