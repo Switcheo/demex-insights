@@ -117,8 +117,14 @@ module.exports = async function (fastify, opts) {
     }
   )
 
+  fastify.get('/fees/:id', {
+    // TODO: use same function as trades/volume
+  }, async function (request, reply) {
+    return {}
+  })
 
   fastify.get('/performance/:id', {
+    // TODO: use same function as trades/volume
   }, async function (request, reply) {
     return {}
   })
@@ -160,7 +166,7 @@ module.exports = async function (fastify, opts) {
       const client = await fastify.pg.connect()
       try {
         const { id } = request.params
-        const address = generatePerpPoolAddress(id)
+        const address = generatePerpPoolAddress(id) // TODO: handle spot?
         const query = `
           SELECT
             SUM(maker_amount) AS maker_amount,
@@ -168,7 +174,7 @@ module.exports = async function (fastify, opts) {
             SUM(maker_amount) + SUM(taker_amount) AS total_amount
           FROM (
             SELECT
-              SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount,
+              SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount, --  // TODO: handle spot?
               0 AS taker_amount
             FROM archived_trades
             WHERE
