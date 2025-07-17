@@ -13,8 +13,9 @@ module.exports = async function (fastify, opts) {
           type: 'object',
           required: ['id'],
           properties: {
-            address: { type: 'string' }
-          }
+            id: { type: 'string' }
+          },
+          additionalProperties: false
         },
         querystring: {
           type: 'object',
@@ -27,6 +28,7 @@ module.exports = async function (fastify, opts) {
         response: {
           200: {
             type: 'object',
+            required: ['id', 'address', 'from', 'to', 'initialPrice', 'finalPrice', 'apr'],
             properties: {
               id: { type: 'string' },
               address: { type: 'string' },
@@ -35,7 +37,8 @@ module.exports = async function (fastify, opts) {
               initialPrice: { type: 'number' },
               finalPrice: { type: 'number' },
               apr: { type: 'number' },
-            }
+            },
+            additionalProperties: false
           }
         }
       }

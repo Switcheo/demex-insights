@@ -11,7 +11,8 @@ module.exports = async function (fastify, opts) {
           required: ['address'],
           properties: {
             address: { type: 'string' }
-          }
+          },
+          additionalProperties: false
         },
         querystring: {
           type: 'object',
@@ -29,12 +30,13 @@ module.exports = async function (fastify, opts) {
                 type: 'array',
                 items: {
                   type: 'object',
+                  required: ['day', 'denom', 'ending_balance'],
                   properties: {
                     day: { type: 'string', format: 'date-time' },
                     denom: { type: 'string' },
                     ending_balance: { type: 'string' }
                   },
-                  required: ['day', 'denom', 'ending_balance']
+                  additionalProperties: false
                 }
               }
             }
@@ -58,14 +60,15 @@ module.exports = async function (fastify, opts) {
     }
   )
 
-  fastify.get('/value/:address', {
+  fastify.get('/values/:address', {
       schema: {
         params: {
           type: 'object',
           required: ['address'],
           properties: {
             address: { type: 'string' }
-          }
+          },
+          additionalProperties: false
         },
         querystring: {
           type: 'object',
@@ -78,20 +81,22 @@ module.exports = async function (fastify, opts) {
         response: {
           200: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               values: {
                 type: 'array',
                 items: {
                   type: 'object',
+                  required: ['day', 'ending_value'],
                   properties: {
                     day: { type: 'string', format: 'date-time' },
                     denom: { type: 'string' },
                     ending_value: { type: 'string' }
                   },
-                  required: ['day', 'ending_value']
+                  additionalProperties: false
                 }
               }
-            }
+            },
           }
         }
       }
@@ -122,6 +127,67 @@ module.exports = async function (fastify, opts) {
       } finally {
         client.release()
       }
+    }
+  )
+
+  fastify.get('/whales', {
+      schema: {
+        params: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+            denom: { type: 'string' },
+            limit: { type: 'number' }
+          },
+          additionalProperties: false
+        },
+        response: {
+          200: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['date', 'whales'],
+              additionalProperties: false,
+              properties: {
+                date: { type: 'string', format: 'date-time' },
+                whales: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['address', 'total_value'],
+                    additionalProperties: false,
+                    properties: {
+                      address: { type: 'string' },
+                      total_value: { type: 'number' },
+                      assets: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          required: ['denom', 'amount', 'value'],
+                          additionalProperties: false,
+                          properties: {
+                            denom: { type: 'string' },
+                            amount: { type: 'string' },
+                            value: { type: 'number' },
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    async function (request, reply) {
     }
   )
 }

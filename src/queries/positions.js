@@ -27,7 +27,6 @@ async function getUnrealizedPnl(client, address) {
   let upnl = 0.0
   for (const p of positions) {
     const mark_price = prices.get(p['token'])
-    console.log(p['token'], mark_price)
 
     if (!mark_price || !mark_price.price) continue
 
