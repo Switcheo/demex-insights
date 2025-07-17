@@ -2,7 +2,9 @@
 
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
-const { getBalanceQuery, daysAgo, today } = require('../../common');
+const { getBalanceQuery } = require('../../queries/balances');
+const { getUnrealizedPnl } = require('../../queries/positions');
+const { daysAgo, today } = require('../../helpers/time');
 
 module.exports = async function (fastify, opts) {
   fastify.get('/apr/:id', {
@@ -22,16 +24,20 @@ module.exports = async function (fastify, opts) {
           },
           additionalProperties: false
         },
-        // response: {
-        //   200: {
-        //     type: 'object',
-        //     properties: {
-        //       result: {
-        //         type: 'string',
-        //       }
-        //     }
-        //   }
-        // }
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              address: { type: 'string' },
+              from: { type: 'string', format: 'date-time' },
+              to: { type: 'string', format: 'date-time' },
+              initialPrice: { type: 'number' },
+              finalPrice: { type: 'number' },
+              apr: { type: 'number' },
+            }
+          }
+        }
       }
     },
     async function (request, reply) {
@@ -85,7 +91,7 @@ module.exports = async function (fastify, opts) {
         }
 
         if (balances.length === 0 || supplies.length === 0) {
-          throw new Error('Could not find pool')
+          throw new Error(`Could not find pool with id '${id}' and address '${address}'`)
         }
 
         if (balances[0].day.toString() !== supplies[0].day.toString()) {
@@ -96,8 +102,9 @@ module.exports = async function (fastify, opts) {
           throw new Error(`Found first balance ${balances[balances.length - 1].day} but first supply ${supplies[supplies.length - 1].day}`)
         }
 
+        const upnl = await getUnrealizedPnl(client, address)
         const initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
-        const finalPrice = parseFloat(balances[balances.length - 1].ending_balance) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
+        const finalPrice = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
         return { id, address, from, to, days, initialPrice, finalPrice, apr }
@@ -117,7 +124,7 @@ function addressHash(inputBytes) {
 }
 
 // Generates a Bech32-encoded address with dynamic prefix
-function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 'swth')) {
+function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 'tswth')) {
   const input = Buffer.from(`${PerpsPoolVaultName}${poolId}`, 'utf8');
   const hashed = addressHash(input);
 

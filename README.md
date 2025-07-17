@@ -13,11 +13,13 @@ Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
 
 ### `npm run dev -- -p 4000`
 
-To start in a different port
+To start in a different port.
 
-### `BECH32_PREFIX=tswth DATABASE_URL=postgres://carboninsights:<yourpw>@localhost:5433/carbon npm run dev -- -p 4000`
-To start the app on port 4000, and set the database url and prefix
+### `BECH32_PREFIX=swth DATABASE_URL=postgres://carboninsights:<yourpw>@localhost:5433/carbon npm run dev -- -p 4000`
+
+To start the app on port 4000, and set a custom database url / bech32 prefix.
 Use this in combination with the ssh port forward command to connect to a remote db via ssh:
+
 ```bash
 # where:
 # 192.168.68.88:20009 is where the db is hosted
@@ -50,7 +52,8 @@ Deploy with `pm2 deploy production`.
 
 To set up a new environment, use `pm2 deploy <env> setup`
 
-## Fastify cli
+## Fastify CLI Cheatsheet
+
 ```bash
 # Setup
 npm install fastify-cli --global

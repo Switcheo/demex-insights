@@ -1,5 +1,7 @@
 'use strict'
 
+const { daysAgo } = require('../helpers/time');
+
 // getBalanceQuery returns the query fragment for the daily ending balance of each denom for the given address
 function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateString(), to = daysAgo(0).toDateString() }) {
   let where = `WHERE address = $1`
@@ -39,24 +41,6 @@ function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateStrin
   return [query, params]
 }
 
-function daysAgo(days = 7, from = today()) {
-  const ago = new Date(from)
-  ago.setDate(from.getDate() - days)
-  return ago
-}
-
-function today() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-function removeTime(datetime) {
-  return new Date(datetime.getFullYear(), datetime.getMonth(), datetime.getDate());
-}
-
 module.exports = {
   getBalanceQuery,
-  daysAgo,
-  today,
-  removeTime
 }
