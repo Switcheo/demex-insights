@@ -3,7 +3,7 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getUnrealizedPnl } = require('../../queries/positions');
+const { getOpenPositionPnls } = require('../../queries/positions');
 const { getFeesQuery } = require('../../queries/trades');
 const { daysAgo, today } = require('../../helpers/time');
 
@@ -63,31 +63,7 @@ module.exports = async function (fastify, opts) {
         `
         const { rows: balances } = await client.query(sortedQuery, params)
 
-        const { rows: supplies } = await client.query( `
-          SELECT
-            day,
-            COALESCE(ending_total_supply, 0) as ending_total_supply
-          FROM (
-            SELECT
-            time_bucket_gapfill('1 day', day) AS day,
-            locf(AVG(ending_total_supply)) AS ending_total_supply
-            FROM (
-              SELECT
-                day,
-                SUM(daily_delta) OVER (
-                  PARTITION BY denom
-                  ORDER BY day
-                ) * (10 ^ -18)::decimal AS ending_total_supply
-              FROM daily_balances
-              WHERE denom = $1
-            ) ends
-            WHERE day >= '2019-01-01' -- must be from start of all data to carry-forward values properly
-            AND day <= $3
-            GROUP BY (time_bucket_gapfill('1 day', day))
-          ) filled
-          WHERE day >= $2
-          ORDER BY day ASC;
-        `, [`cplt/${id}`, from, to])
+        const { rows: supplies } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
 
         const days = (new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24)
         if (days < 1) {
@@ -106,7 +82,7 @@ module.exports = async function (fastify, opts) {
           throw new Error(`Found first balance ${balances[balances.length - 1].day} but first supply ${supplies[supplies.length - 1].day}`)
         }
 
-        const upnl = await getUnrealizedPnl(client, address)
+        const { upnl } = await getOpenPositionPnls(client, address)
         const initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
         const finalPrice = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
@@ -119,7 +95,7 @@ module.exports = async function (fastify, opts) {
   )
 
   fastify.get('/fees/:id', {
-    // TODO: use same function as trades/volume
+    // TODO: add schema
   }, async function (request, reply) {
      const client = await fastify.pg.connect()
       try {
@@ -138,9 +114,42 @@ module.exports = async function (fastify, opts) {
   })
 
   fastify.get('/performance/:id', {
-    // TODO: use same function as trades/volume
+    // TODO: add schema
   }, async function (request, reply) {
-    return {}
+     const client = await fastify.pg.connect()
+      try {
+        const { id } = request.params
+        const { from, to } = request.query
+        const address = generatePerpPoolAddress(id) // TODO: handle spot?
+        const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to })
+        const sortedQuery = `
+          SELECT
+            day,
+            ending_balance * (10 ^ -18)::decimal AS ending_balance
+          FROM (
+            ${query}
+            ORDER BY day ASC
+          ) t;
+        `
+        const [q, p] = getFeesQuery(address, { denom, from, to })
+
+        const { rows: balances } = await client.query(sortedQuery, params)
+        const { rows: supplies } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
+        const { rows: fees } = await client.query(q, p)
+        // TODO: get total rpnl from positions each day
+        const { rows: totalPNL } = await client.query('', [])
+        const { upnl, rpnl } = await getOpenPositionPnls(client, address)
+
+        // for each day, iterate and process
+        // TODO
+
+        // prev + rpnl + funding - fees = new
+        // => funding = (new - prev) + fees = delta - rpnl + fees
+        // show funding, rebate = -fees, rpnl
+        return {  }
+      } finally {
+        client.release()
+      }
   })
 
   fastify.get('/24h_volume/:id', {
@@ -235,3 +244,29 @@ function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 
   const words = bech32.toWords(hashed);
   return bech32.encode(prefix, words);
 }
+
+const SupplyQuery = `
+          SELECT
+            day,
+            COALESCE(ending_total_supply, 0) as ending_total_supply
+          FROM (
+            SELECT
+            time_bucket_gapfill('1 day', day) AS day,
+            locf(AVG(ending_total_supply)) AS ending_total_supply
+            FROM (
+              SELECT
+                day,
+                SUM(daily_delta) OVER (
+                  PARTITION BY denom
+                  ORDER BY day
+                ) * (10 ^ -18)::decimal AS ending_total_supply
+              FROM daily_balances
+              WHERE denom = $1
+            ) ends
+            WHERE day >= '2019-01-01' -- must be from start of all data to carry-forward values properly
+            AND day <= $3
+            GROUP BY (time_bucket_gapfill('1 day', day))
+          ) filled
+          WHERE day >= $2
+          ORDER BY day ASC;
+        `
