@@ -1,4 +1,5 @@
 const { daysAgo } = require('../../helpers/time');
+const { getFeesQuery } = require('../../queries/trades');
 
 module.exports = async function (fastify, opts) {
   fastify.get('/volume/:address', {
@@ -36,6 +37,7 @@ module.exports = async function (fastify, opts) {
                     total_amount: { type: 'string' },
                     denom: { type: 'string' }
                   },
+                  additionalProperties: false
                 }
               }
             }
@@ -91,6 +93,7 @@ module.exports = async function (fastify, opts) {
         if (denom) params.push(denom)
 
         const { rows } = await client.query(query, params)
+
         return { volume: rows }
       } finally {
         client.release()
@@ -99,8 +102,56 @@ module.exports = async function (fastify, opts) {
   )
 
   fastify.get('/fees/:address', {
-
+    schema: {
+      params: {
+        type: 'object',
+        required: ['address'],
+        properties: {
+          address: { type: 'string' }
+        },
+        additionalProperties: false
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', format: 'date-time' },
+          to: { type: 'string', format: 'date-time' },
+          denom: { type: 'string' }
+        },
+        additionalProperties: false
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            volume: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  day: { type: 'string', format: 'date-time' },
+                  denom: { type: 'string' },
+                  // TODO: add others
+                },
+                // additionalProperties: false
+              }
+            }
+          }
+        }
+      }
+    }
   }, async function (request, reply) {
-    return {}
+      const client = await fastify.pg.connect()
+      try {
+        const { denom, from, to } = request.query
+
+        const [query, params] = getFeesQuery(request.params.address, { denom, from, to })
+
+        const { rows } = await client.query(query, params)
+
+        return { fees: rows }
+      } finally {
+        client.release()
+      }
   })
 }

@@ -4,6 +4,7 @@ const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
 const { getUnrealizedPnl } = require('../../queries/positions');
+const { getFeesQuery } = require('../../queries/trades');
 const { daysAgo, today } = require('../../helpers/time');
 
 module.exports = async function (fastify, opts) {
@@ -120,7 +121,20 @@ module.exports = async function (fastify, opts) {
   fastify.get('/fees/:id', {
     // TODO: use same function as trades/volume
   }, async function (request, reply) {
-    return {}
+     const client = await fastify.pg.connect()
+      try {
+        const { id } = request.params
+        const { denom, from, to } = request.query
+        const address = generatePerpPoolAddress(id) // TODO: handle spot?
+
+        const [query, params] = getFeesQuery(address, { denom, from, to })
+
+        const { rows } = await client.query(query, params)
+
+        return { fees: rows }
+      } finally {
+        client.release()
+      }
   })
 
   fastify.get('/performance/:id', {
