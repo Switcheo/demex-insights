@@ -89,8 +89,18 @@ module.exports = async function (fastify, opts) {
 
         const { upnl } = await getOpenPositionPnls(client, address)
         let initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
-        if (Number.isNaN(initialPrice)) initialPrice = 1
-        const finalPrice = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
+        // if first price can't be found, it means the pool has no balance yet or it is empty, so just use 1
+        if (!Number.isFinite(initialPrice)) initialPrice = 1
+
+        // find the last valid price (because 0 supply would cause a div by zero), else use the initial price
+        let finalPrice = initialPrice
+        for (let i = supplies.length - 1; i >= 0; i--) {
+          const p = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
+          if (Number.isFinite(p)) {
+            finalPrice = p
+            break
+          }
+        }
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
         return { id, address, from, to, days, initialPrice, finalPrice, apr }
