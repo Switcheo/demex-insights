@@ -87,9 +87,11 @@ module.exports = async function (fastify, opts) {
         }
 
         const { upnl } = await getOpenPositionPnls(client, address)
-        const initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
+        let initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
+        if (Number.isNaN(initialPrice)) initialPrice = 1
         const finalPrice = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
+        console.log({ id, address, from, to, days, initialPrice, finalPrice, apr })
 
         return { id, address, from, to, days, initialPrice, finalPrice, apr }
       } finally {
@@ -181,7 +183,7 @@ module.exports = async function (fastify, opts) {
           result.push({ day, totalPNL: totalProfit, components: { rPNL, uPNL: isLast ? upnl : 0, feeRebate: -fee, funding }})
         }
 
-        return { address, performance: result }
+        return { id, from, to, address, performance: result }
       } finally {
         client.release()
       }
