@@ -2,7 +2,7 @@
 
 function daysAgo(days = 7, from = today()) {
   const ago = new Date(from)
-  ago.setDate(from.getDate() - days)
+  ago.setDate(new Date(from).getDate() - days)
   return ago
 }
 

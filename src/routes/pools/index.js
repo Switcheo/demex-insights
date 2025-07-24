@@ -48,8 +48,9 @@ module.exports = async function (fastify, opts) {
       const client = await fastify.pg.connect()
       try {
         const { id } = request.params
-        const from = request.query.from || daysAgo(30)
-        const to = request.query.to || today()
+        let { from, to } = request.query
+        from = from ? daysAgo(0, from) : daysAgo(31)
+        to = daysAgo(0, to)
         const address = generatePerpPoolAddress(id)
         const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to })
         const sortedQuery = `
@@ -91,7 +92,6 @@ module.exports = async function (fastify, opts) {
         if (Number.isNaN(initialPrice)) initialPrice = 1
         const finalPrice = (parseFloat(balances[balances.length - 1].ending_balance) + upnl) / parseFloat(supplies[supplies.length - 1].ending_total_supply)
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
-        console.log({ id, address, from, to, days, initialPrice, finalPrice, apr })
 
         return { id, address, from, to, days, initialPrice, finalPrice, apr }
       } finally {
@@ -126,9 +126,8 @@ module.exports = async function (fastify, opts) {
       try {
         const { id } = request.params
         let { from, to } = request.query
-        from ||= daysAgo(30)
-        from = daysAgo(1, from).toDateString() // we need one additional day to derive pnl for the first day
-        to ||= daysAgo(0).toDateString()
+        from = from ? daysAgo(1, from).toISOString() : daysAgo(31) // we need one additional day to derive pnl for the first day
+        to = daysAgo(0, to).toISOString()
 
         const denom = 'cgt/1'
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
@@ -148,11 +147,12 @@ module.exports = async function (fastify, opts) {
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: totalRPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
 
-        const dates = supplyRows.map(elem => elem.day)
+        const dates = totalRPNLRows.map(elem => elem.day)
         const balances = toDateMap(balanceRows)
         const supplies = toDateMap(supplyRows)
         const fees = toDateMap(feeRows)
         const rpnls = toDateMap(totalRPNLRows)
+
 
         const { upnl, rpnl } = await getOpenPositionPnls(client, address)
 
@@ -345,10 +345,10 @@ const TotalRPNLQuery = `
     GROUP BY c.hour --, c.address
   )
   SELECT
-    time_bucket_gapfill('1 day', j.hour) AS day,
+    time_bucket('1 day', j.hour) AS day,
     SUM(j.rpnl) AS rpnl
   FROM j
-  WHERE j.hour > $2 AND j.hour < $3
+  WHERE j.hour >= $2 AND j.hour <= $3
   GROUP BY day
   ORDER BY day DESC;
 `
