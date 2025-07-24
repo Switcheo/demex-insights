@@ -177,10 +177,12 @@ module.exports = async function (fastify, opts) {
             totalProfit += upnl
           }
           const rPNL = parseFloat(rpnls[day]?.total_realized_pnl || 0) + (isLast ? rpnl : 0)
-          const fee = parseFloat(fees[day]?.total_fee || 0)
+          const makerFee = parseFloat(fees[day]?.maker_fee || 0)
+          const takerFee = parseFloat(fees[day]?.taker_fee || 0)
+          const totalFee = makerFee + takerFee
           // since totalProfit = rpnl + funding - fees, =>
-          const funding = totalProfit - rPNL + fee
-          result.push({ day, totalPNL: totalProfit, components: { rPNL, uPNL: isLast ? upnl : 0, feeRebate: -fee, funding }})
+          const funding = totalProfit - rPNL + totalFee
+          result.push({ day, totalPNL: totalProfit, components: { rPNL, uPNL: isLast ? upnl : 0, makerFee, takerFee, funding }})
         }
 
         return { id, from, to, address, performance: result }
