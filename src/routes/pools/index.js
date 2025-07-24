@@ -350,5 +350,5 @@ const TotalRPNLQuery = `
   FROM j
   WHERE j.hour >= $2 AND j.hour <= $3
   GROUP BY day
-  ORDER BY day DESC;
+  ORDER BY day ASC;
 `
