@@ -241,9 +241,9 @@ module.exports = async function (fastify, opts) {
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
         const query = `
           SELECT
-            SUM(maker_amount) AS maker_amount,
-            SUM(taker_amount) AS taker_amount,
-            SUM(maker_amount) + SUM(taker_amount) AS total_amount
+            SUM(maker_amount) AS makerAmount,
+            SUM(taker_amount) AS takerAmount,
+            SUM(maker_amount) + SUM(taker_amount) AS totalAmount
           FROM (
             SELECT
               SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount, --  // TODO: handle spot?
@@ -269,7 +269,7 @@ module.exports = async function (fastify, opts) {
         `
         const { rows } = await client.query(query, [address])
 
-        return { id, address, ...rows[0]}
+        return { id, address, volume: rows[0]}
       } finally {
         client.release()
       }
