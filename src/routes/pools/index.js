@@ -3,7 +3,7 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getOpenPositionPnls } = require('../../queries/positions');
+const { getOpenPositionUPnl } = require('../../queries/positions');
 const { getFeesQuery } = require('../../queries/trades');
 const { daysAgo, today } = require('../../helpers/time');
 
@@ -87,7 +87,7 @@ module.exports = async function (fastify, opts) {
           throw new Error(`Found first balance ${balances[balances.length - 1].day} but first supply ${supplies[supplies.length - 1].day}`)
         }
 
-        const { upnl } = await getOpenPositionPnls(client, address)
+        const upnl = await getOpenPositionUPnl(client, address)
         let initialPrice = parseFloat(balances[0].ending_balance) / parseFloat(supplies[0].ending_total_supply)
         // if first price can't be found, it means the pool has no balance yet or it is empty, so just use 1
         if (!Number.isFinite(initialPrice)) initialPrice = 1
@@ -157,14 +157,14 @@ module.exports = async function (fastify, opts) {
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: totalRPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
 
-        const dates = totalRPNLRows.map(elem => elem.day)
+        const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
+        const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
         const balances = toDateMap(balanceRows)
         const supplies = toDateMap(supplyRows)
         const fees = toDateMap(feeRows)
         const rpnls = toDateMap(totalRPNLRows)
 
-
-        const { upnl, rpnl } = await getOpenPositionPnls(client, address)
+        const upnl = await getOpenPositionUPnl(client, address)
 
         if (dates.length < 2) {
           throw new Error('Insufficient data')
@@ -186,7 +186,7 @@ module.exports = async function (fastify, opts) {
           if (isLast) {
             totalProfit += upnl
           }
-          const rPNL = parseFloat(rpnls[day]?.total_realized_pnl || 0) + (isLast ? rpnl : 0)
+          const rPNL = parseFloat(rpnls[day]?.rpnl || 0)
           const makerFee = parseFloat(fees[day]?.maker_fee || 0)
           const takerFee = parseFloat(fees[day]?.taker_fee || 0)
           const totalFee = makerFee + takerFee
@@ -312,7 +312,7 @@ function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 
 
 function toDateMap(arr) {
   return arr.reduce((map, elem) => {
-    const d = elem.day
+    const d = elem.day.toISOString()
     delete elem.day
     map[d] = elem
     return map
@@ -374,7 +374,7 @@ const TotalRPNLQuery = `
   )
   SELECT
     time_bucket('1 day', j.hour) AS day,
-    SUM(j.rpnl) AS rpnl
+    SUM(j.rpnl) * (10 ^ -18)::decimal AS rpnl
   FROM j
   WHERE j.hour >= $2 AND j.hour <= $3
   GROUP BY day

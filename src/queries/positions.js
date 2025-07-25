@@ -21,13 +21,12 @@ async function getOpenPositions(client, address) {
   return positions
 }
 
-// getOpenPositionPnls returns the total unrealized and realized PNL of all open positions for the address
-async function getOpenPositionPnls(client, address) {
+// getOpenPositionUPnl returns the total unrealized PNL of all open positions for the address
+async function getOpenPositionUPnl(client, address) {
   const prices = await getMarketPrices()
   const positions = await getOpenPositions(client, address)
 
   let upnl = 0.0
-  let rpnl = 0.0
   for (const p of positions) {
     const raw_price = prices.get(p['market_id'])
 
@@ -36,12 +35,11 @@ async function getOpenPositionPnls(client, address) {
     const mark_price = parseFloat(raw_price) * (10 ** parseInt(p['price_decimals'], 10))
 
     upnl += parseFloat(p['lots']) * (mark_price - parseFloat(p['entry_price']))
-    rpnl += parseFloat(p['realized_pnl']) * (10 ** -18)
   }
 
-  return { upnl, rpnl }
+  return upnl
 }
 
 module.exports = {
-  getOpenPositionPnls,
+  getOpenPositionUPnl,
 }
