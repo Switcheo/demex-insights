@@ -3,9 +3,9 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getOpenPositionUPnl } = require('../../queries/positions');
+const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 const { getFeesQuery } = require('../../queries/trades');
-const { daysAgo, today } = require('../../helpers/time');
+const { normalizedTimeParams } = require('../../helpers/time');
 
 module.exports = async function (fastify, opts) {
   fastify.get('/apr/:id', {
@@ -48,9 +48,7 @@ module.exports = async function (fastify, opts) {
       const client = await fastify.pg.connect()
       try {
         const { id } = request.params
-        let { from, to } = request.query
-        from = from ? daysAgo(0, from) : daysAgo(31)
-        to = daysAgo(0, to)
+        const { from, to } = normalizedTimeParams(request.query)
         const address = generatePerpPoolAddress(id)
         const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to })
         const sortedQuery = `
@@ -135,34 +133,21 @@ module.exports = async function (fastify, opts) {
      const client = await fastify.pg.connect()
       try {
         const { id } = request.params
-        let { from, to } = request.query
-        from = from ? daysAgo(1, from).toISOString() : daysAgo(31) // we need one additional day to derive pnl for the first day
-        to = daysAgo(0, to).toISOString()
+        const { from, to } = normalizedTimeParams(request.query, 1)
 
         const denom = 'cgt/1'
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
-        const [query, balanceParams] = getBalanceQuery(address, { denom, from, to })
-        const balanceQuery = `
-          SELECT
-            day,
-            ending_balance * (10 ^ -18)::decimal AS ending_balance
-          FROM (
-            ${query}
-            ORDER BY day ASC
-          ) t;
-        `
         const [feeQuery, feeParams] = getFeesQuery(address, { denom, from, to })
-        const { rows: balanceRows } = await client.query(balanceQuery, balanceParams)
-        const { rows: supplyRows } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
-        const { rows: totalRPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
+        const { rows: fundingRows } = await client.query(FundingQuery, [address, from, to])
+        const { rows: supplyRows } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
+        const { rows: totalPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
 
         const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
-        const balances = toDateMap(balanceRows)
-        const supplies = toDateMap(supplyRows)
         const fees = toDateMap(feeRows)
-        const rpnls = toDateMap(totalRPNLRows)
+        const fundings = toDateMap(fundingRows)
+        const pnls = toDateMap(totalPNLRows)
 
         const upnl = await getOpenPositionUPnl(client, address)
 
@@ -173,26 +158,14 @@ module.exports = async function (fastify, opts) {
         const result = []
         for (let i = 1; i < dates.length; ++i) {
           const day = dates[i]
-          const prevDay = dates[i-1]
           const isLast = i === dates.length - 1
-          let totalProfit = parseFloat(balances[day].ending_balance) - parseFloat(balances[prevDay].ending_balance)
-          // account for deposits / withdrawals
-          const inflow = parseFloat(supplies[day].ending_total_supply) - parseFloat(supplies[prevDay].ending_total_supply)
-          if (inflow !== 0) {
-            // assume inflow $ is at prev value
-            const prevValue = parseFloat(balances[prevDay].ending_balance) / parseFloat(supplies[prevDay].ending_total_supply)
-            totalProfit = totalProfit - (inflow * prevValue)
-          }
-          if (isLast) {
-            totalProfit += upnl
-          }
-          const rPNL = parseFloat(rpnls[day]?.rpnl || 0)
+          const funding = parseFloat(fundings[day]?.funding || 0)
+          const totalPNL = parseFloat(pnls[day]?.rpnl || 0)
           const makerFee = parseFloat(fees[day]?.maker_fee || 0)
           const takerFee = parseFloat(fees[day]?.taker_fee || 0)
           const totalFee = makerFee + takerFee
-          // since totalProfit = rpnl + funding - fees, =>
-          const funding = totalProfit - rPNL + totalFee
-          result.push({ day, totalPNL: totalProfit, components: { rPNL, uPNL: isLast ? upnl : 0, makerFee, takerFee, funding }})
+          const rPNL = totalPNL + totalFee + funding // fees and fundings are deductions
+          result.push({ day, totalPNL, components: { rPNL, uPNL: isLast ? upnl : 0, makerFee, takerFee, fundingFee: funding }})
         }
 
         return { id, from, to, address, performance: result }
@@ -345,38 +318,13 @@ const SupplyQuery = `
           ORDER BY day ASC;
         `
 
-const TotalRPNLQuery = `
-  WITH h AS (
-    SELECT
-      f.hour,
-      -- f.address,
-      f.market,
-      CASE
-         WHEN p.closed_block_height != 0 THEN
-          -- since we are using snapshots, minus of the previous rpnl which has either been closed and accounted for in 'hourly_closed_rpnl',
-          -- or is being carried to this current open position which we should net off from previous snapshot
-          p.realized_pnl - lead(p.realized_pnl, 1, 0) OVER (PARTITION BY f.address, f.market ORDER BY f.hour DESC)
-        ELSE 0 -- if this is a closed position, it is already fully accounted for in 'hourly_closed_rpnl' below
-      END AS rpnl
-    FROM hourly_final_position_ids f
-    JOIN archived_positions p ON p.id = f.id
-    WHERE f.address = $1
-  ),
-  j AS (
-    SELECT
-      c.hour,
-      -- c.address,
-      SUM(COALESCE(c.total_realized_pnl, 0)) + SUM(COALESCE(h.rpnl, 0)) AS rpnl
-    FROM hourly_closed_rpnl c
-    FULL OUTER JOIN h ON c.hour = h.hour -- AND c.address = h.address
-    WHERE c.address = $1
-    GROUP BY c.hour --, c.address
-  )
+const FundingQuery = `
   SELECT
-    time_bucket('1 day', j.hour) AS day,
-    SUM(j.rpnl) * (10 ^ -18)::decimal AS rpnl
-  FROM j
-  WHERE j.hour >= $2 AND j.hour <= $3
-  GROUP BY day
+    day,
+    SUM(funding) AS funding
+  FROM
+    daily_funding
+  WHERE address = $1 AND day >= $2 AND day <= $3
+  GROUP BY address, day
   ORDER BY day ASC;
 `

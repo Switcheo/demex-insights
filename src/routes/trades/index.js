@@ -1,7 +1,82 @@
-const { daysAgo } = require('../../helpers/time');
+const { normalizedTimeParams } = require('../../helpers/time');
 const { getFeesQuery } = require('../../queries/trades');
+const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 
 module.exports = async function (fastify, opts) {
+
+  fastify.get('/perps_pnl/:address', {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['address'],
+          properties: {
+            address: { type: 'string' }
+          },
+          additionalProperties: false
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+          },
+          additionalProperties: false
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              address: { type: 'string' },
+              from: { type: 'string', format: 'date-time' },
+              to: { type: 'string', format: 'date-time' },
+              pnls: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['day', 'pnl'],
+                  properties: {
+                    day: { type: 'string', format: 'date-time' },
+                    pnl: { type: 'number' },
+                  },
+                  additionalProperties: false
+                }
+              }
+            }
+          }
+        }
+      }
+  }, async function (request, reply) {
+     const client = await fastify.pg.connect()
+      try {
+        const { address } = request.params
+        const { from, to } = normalizedTimeParams(request.query)
+
+        const { rows } = await client.query(TotalRPNLQuery, [address, from, to])
+
+        // gapfill
+        const filled = []
+        if (rows.length > 0) {
+          let row = rows.shift()
+          const date = new Date(row.day)
+          while (rows.length) {
+            if (new Date(row.day).getTime() === date.getTime()) {
+              filled.push({ day: row.day.toISOString(), pnl: row.rpnl })
+              row = rows.shift()
+            } else {
+              filled.push({ day: date.toISOString(), pnl: 0 })
+            }
+            date.setDate(date.getDate() + 1)
+          }
+          const upnl = await getOpenPositionUPnl(client, address)
+          filled.push({ day: row.day.toISOString(), pnl: (Number(row.rpnl) + upnl).toString() })
+        }
+
+        return { address, from, to, pnls: filled }
+      } finally {
+        client.release()
+      }
+  })
+
   fastify.get('/volume/:address', {
       schema: {
         params: {
@@ -25,6 +100,9 @@ module.exports = async function (fastify, opts) {
           200: {
             type: 'object',
             properties: {
+              address: { type: 'string' },
+              from: { type: 'string', format: 'date-time' },
+              to: { type: 'string', format: 'date-time' },
               volume: {
                 type: 'array',
                 items: {
@@ -48,9 +126,9 @@ module.exports = async function (fastify, opts) {
     async function (request, reply) {
       const client = await fastify.pg.connect()
       try {
-        const from = request.query.from || daysAgo(30).toDateString()
-        const to = request.query.to || daysAgo(0).toDateString()
+        const { address } = request.params
         const denom = request.query.denom
+        const { from, to } = normalizedTimeParams(request.query)
 
         const query = `
           SELECT
@@ -89,12 +167,12 @@ module.exports = async function (fastify, opts) {
           LEFT JOIN tokens ON tokens.denom = volumes.denom;
         `
 
-        const params = [request.params.address, from, to]
+        const params = [, from, to]
         if (denom) params.push(denom)
 
         const { rows } = await client.query(query, params)
 
-        return { volume: rows }
+        return { address, from, to, volume: rows }
       } finally {
         client.release()
       }
@@ -124,7 +202,10 @@ module.exports = async function (fastify, opts) {
         200: {
           type: 'object',
           properties: {
-            volume: {
+            address: { type: 'string' },
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+            fees: {
               type: 'array',
               items: {
                 type: 'object',
@@ -143,13 +224,15 @@ module.exports = async function (fastify, opts) {
   }, async function (request, reply) {
       const client = await fastify.pg.connect()
       try {
-        const { denom, from, to } = request.query
+        const { address } = request.params
+        const { denom } = request.query
+        const { from, to } = normalizedTimeParams(request.query)
 
         const [query, params] = getFeesQuery(request.params.address, { denom, from, to })
 
         const { rows } = await client.query(query, params)
 
-        return { fees: rows }
+        return { address, from, to, fees: rows }
       } finally {
         client.release()
       }

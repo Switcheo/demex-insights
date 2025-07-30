@@ -40,6 +40,43 @@ async function getOpenPositionUPnl(client, address) {
   return upnl
 }
 
+const TotalRPNLQuery = `
+  WITH h AS (
+    SELECT
+      f.hour,
+      -- f.address,
+      f.market,
+      CASE
+         WHEN p.closed_block_height != 0 THEN
+          -- since we are using snapshots, minus of the previous rpnl which has either been closed and accounted for in 'hourly_closed_rpnl',
+          -- or is being carried to this current open position which we should net off from previous snapshot
+          p.realized_pnl - lead(p.realized_pnl, 1, 0) OVER (PARTITION BY f.address, f.market ORDER BY f.hour DESC)
+        ELSE 0 -- if this is a closed position, it is already fully accounted for in 'hourly_closed_rpnl' below
+      END AS rpnl
+    FROM hourly_final_position_ids f
+    JOIN archived_positions p ON p.id = f.id
+    WHERE f.address = $1
+  ),
+  j AS (
+    SELECT
+      c.hour,
+      -- c.address,
+      SUM(COALESCE(c.total_realized_pnl, 0)) + SUM(COALESCE(h.rpnl, 0)) AS rpnl
+    FROM hourly_closed_rpnl c
+    FULL OUTER JOIN h ON c.hour = h.hour -- AND c.address = h.address
+    WHERE c.address = $1
+    GROUP BY c.hour --, c.address
+  )
+  SELECT
+    time_bucket('1 day', j.hour) AS day,
+    SUM(j.rpnl) * (10 ^ -18)::decimal AS rpnl
+  FROM j
+  WHERE j.hour >= $2 AND j.hour <= $3
+  GROUP BY day
+  ORDER BY day ASC;
+`
+
 module.exports = {
   getOpenPositionUPnl,
+  TotalRPNLQuery,
 }

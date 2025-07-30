@@ -1,5 +1,6 @@
 'use strict'
 
+const { normalizedTimeParams } = require('../../helpers/time')
 const { getBalanceQuery } = require('../../queries/balances')
 const { getTokenPrices } = require('../../queries/prices')
 
@@ -47,10 +48,11 @@ module.exports = async function (fastify, opts) {
     async function (request, reply) {
       const client = await fastify.pg.connect()
       try {
-        const [query, params] = getBalanceQuery(request.params.address, { from: request.query.from, to: request.query.to })
+        const { from, to } = normalizedTimeParams(request.query)
+        const [query, params] = getBalanceQuery(request.params.address, { from, to })
         const sortedQuery = `
           ${query}
-          ORDER BY day DESC, denom ASC;
+          ORDER BY day ASC, denom ASC;
         `
         const { rows } = await client.query(sortedQuery, params)
         return { coins: rows }
@@ -104,10 +106,11 @@ module.exports = async function (fastify, opts) {
     async function (request, reply) {
       const client = await fastify.pg.connect()
       try {
+        const { from, to } = request.query
         const prices = await getTokenPrices()
         const values = Array.from(prices.entries()).map(([denom, value]) => `('${denom}', ${value?.price || 0}, ${value?.decimals || 18})`).join(', ');
 
-        const [query, params] = getBalanceQuery(request.params.address, { from: request.query.from, to: request.query.to })
+        const [query, params] = getBalanceQuery(request.params.address, { from, to })
         const valueQuery = `
           WITH
             prices(denom, price, decimals) AS (VALUES ${values}),
@@ -119,7 +122,7 @@ module.exports = async function (fastify, opts) {
           INNER JOIN ending_balances
           ON prices.denom = ending_balances.denom
           GROUP BY day
-          ORDER BY day DESC;
+          ORDER BY day ASC;
         `
 
         const { rows } = await client.query(valueQuery, params)

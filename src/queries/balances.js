@@ -1,9 +1,7 @@
 'use strict'
 
-const { daysAgo } = require('../helpers/time');
-
 // getBalanceQuery returns the query fragment for the daily ending balance of each denom for the given address
-function getBalanceQuery(address, { denom = null, from = daysAgo(30).toDateString(), to = daysAgo(0).toDateString() }) {
+function getBalanceQuery(address, { denom = null, from, to }) {
   let where = `WHERE address = $1`
   const params = [address, from, to]
   if (denom) {
