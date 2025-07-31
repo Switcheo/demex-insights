@@ -55,10 +55,10 @@ module.exports = async function (fastify, opts) {
         const upnl = await getOpenPositionUPnl(client, address)
 
         // gapfill
+        const date = new Date(from)
         const filled = []
         if (rows.length > 0) {
           let row = rows.shift()
-          const date = new Date(row.day)
           while (rows.length) {
             if (new Date(row.day).getTime() === date.getTime()) {
               filled.push({ day: row.day.toISOString(), pnl: row.rpnl })

@@ -47,7 +47,7 @@ const TotalRPNLQuery = `
       f.address,
       f.market,
       CASE
-         WHEN p.closed_block_height != 0 THEN
+         WHEN p.closed_block_height = 0 THEN
           -- since we are using snapshots, minus of the previous rpnl which has either been closed and accounted for in 'hourly_closed_rpnl',
           -- or is being carried to this current open position which we should net off from previous snapshot
           p.realized_pnl - lead(p.realized_pnl, 1, 0) OVER (PARTITION BY f.address, f.market ORDER BY f.hour DESC)
