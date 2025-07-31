@@ -1,4 +1,4 @@
-const { normalizedTimeParams } = require('../../helpers/time');
+const { normalizedTimeParams, daysAgo } = require('../../helpers/time');
 const { getFeesQuery } = require('../../queries/trades');
 const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 
@@ -52,6 +52,7 @@ module.exports = async function (fastify, opts) {
         const { from, to } = normalizedTimeParams(request.query)
 
         const { rows } = await client.query(TotalRPNLQuery, [address, from, to])
+        const upnl = await getOpenPositionUPnl(client, address)
 
         // gapfill
         const filled = []
@@ -67,8 +68,9 @@ module.exports = async function (fastify, opts) {
             }
             date.setDate(date.getDate() + 1)
           }
-          const upnl = await getOpenPositionUPnl(client, address)
           filled.push({ day: row.day.toISOString(), pnl: (Number(row.rpnl) + upnl).toString() })
+        } else {
+          upnl.push({ day: daysAgo(0).toISOString(), pnl: upnl.toString() })
         }
 
         return { address, from, to, pnls: filled }
