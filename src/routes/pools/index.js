@@ -35,6 +35,7 @@ module.exports = async function (fastify, opts) {
               address: { type: 'string' },
               from: { type: 'string', format: 'date-time' },
               to: { type: 'string', format: 'date-time' },
+              days: { type: 'number' },
               initialPrice: { type: 'number' },
               finalPrice: { type: 'number' },
               apr: { type: 'number' },
