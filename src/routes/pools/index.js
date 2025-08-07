@@ -50,7 +50,12 @@ module.exports = async function (fastify, opts) {
         const { id } = request.params
         const { from, to } = normalizedTimeParams(request.query)
         const address = generatePerpPoolAddress(id)
-        const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to })
+        const { poolDenom, startDate } = await getPoolDenomAndStartDate(client, id)
+        if (!startDate) {
+          throw new Error(`Cannot find pool with id: ${id} and denom: ${poolDenom}`)
+        }
+
+        const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to, startDate })
         const sortedQuery = `
           SELECT
             day,
@@ -61,24 +66,20 @@ module.exports = async function (fastify, opts) {
           ) t;
         `
         const { rows: balances } = await client.query(sortedQuery, params)
+        const { rows: supplies } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
 
-        const { rows: supplies } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
-
-        const days = (new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24)
-        if (days < 1) {
-          throw new Error('Time frame needs to be > 1 day')
+        let start = new Date(startDate)
+        if (from > start) {
+          start = from
         }
-
-        if (balances.length === 0 || supplies.length === 0) {
-          throw new Error(`Could not find pool with id '${id}' and address '${address}'`)
+        if (supplies.length < 2) {
+          throw new Error('Insufficient data')
         }
+        let end = new Date(supplies[supplies.length - 1].day)
+        const days = (end - start) / (1000 * 60 * 60 * 24)
 
         if (balances[0].day.toString() !== supplies[0].day.toString()) {
           throw new Error(`Found first balance ${balances[0].day} but first supply ${supplies[0].day}`)
-        }
-
-        if (balances.length < 2) {
-          throw new Error('Insufficient data')
         }
 
         if (balances[balances.length - 1].day.toString() !== supplies[supplies.length - 1].day.toString()) {
@@ -101,7 +102,7 @@ module.exports = async function (fastify, opts) {
         }
         const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
-        return { id, address, from, to, days, initialPrice, finalPrice, apr }
+        return { id, address, from: start, to: end, days, initialPrice, finalPrice, apr }
       } finally {
         client.release()
       }
@@ -137,10 +138,15 @@ module.exports = async function (fastify, opts) {
 
         const denom = 'cgt/1'
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
+        const { poolDenom, startDate } = await getPoolDenomAndStartDate(client, id)
+        if (!startDate) {
+          throw new Error(`Cannot find pool with id: ${id} and denom: ${poolDenom}`)
+        }
+
         const [feeQuery, feeParams] = getFeesQuery(address, { denom, from, to })
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: fundingRows } = await client.query(FundingQuery, [address, from, to])
-        const { rows: supplyRows } = await client.query(SupplyQuery, [`cplt/${id}`, from, to])
+        const { rows: supplyRows } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
         const { rows: totalPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
 
         const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
@@ -292,31 +298,52 @@ function toDateMap(arr) {
   }, {})
 }
 
+async function getPoolDenomAndStartDate(client, id) {
+  let poolDenom = `cplt/${id}`
+  let startDate
+  const { rows } = await client.query(PoolStartDateQuery, [poolDenom])
+  if (!rows[0].day) {
+    poolDenom = `duvt/${id}`
+    const { rows: rows2 } = await client.query(PoolStartDateQuery, [poolDenom])
+    startDate = rows2[0].day
+  } else {
+    startDate = rows[0].day
+  }
+  return { poolDenom, startDate }
+}
+
+const PoolStartDateQuery = `
+  SELECT
+    MIN(day) as day
+  FROM daily_balances
+  WHERE denom = $1;
+`
+
 const SupplyQuery = `
-          SELECT
-            day,
-            COALESCE(ending_total_supply, 0) as ending_total_supply
-          FROM (
-            SELECT
-            time_bucket_gapfill('1 day', day) AS day,
-            locf(AVG(ending_total_supply)) AS ending_total_supply
-            FROM (
-              SELECT
-                day,
-                SUM(daily_delta) OVER (
-                  PARTITION BY denom
-                  ORDER BY day
-                ) * (10 ^ -18)::decimal AS ending_total_supply
-              FROM daily_balances
-              WHERE denom = $1
-            ) ends
-            WHERE day >= '2019-01-01' -- must be from start of all data to carry-forward values properly
-            AND day <= $3
-            GROUP BY (time_bucket_gapfill('1 day', day))
-          ) filled
-          WHERE day >= $2
-          ORDER BY day ASC;
-        `
+  SELECT
+    day,
+    COALESCE(ending_total_supply, 0) as ending_total_supply
+  FROM (
+    SELECT
+    time_bucket_gapfill('1 day', day) AS day,
+    locf(AVG(ending_total_supply)) AS ending_total_supply
+    FROM (
+      SELECT
+        day,
+        SUM(daily_delta) OVER (
+          PARTITION BY denom
+          ORDER BY day
+        ) * (10 ^ -18)::decimal AS ending_total_supply
+      FROM daily_balances
+      WHERE denom = $1
+    ) ends
+    WHERE day >= $4
+    AND day <= $3
+    GROUP BY (time_bucket_gapfill('1 day', day))
+  ) filled
+  WHERE day >= $2
+  ORDER BY day ASC;
+`
 
 const FundingQuery = `
   SELECT

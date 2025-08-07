@@ -1,11 +1,11 @@
 'use strict'
 
 // getBalanceQuery returns the query fragment for the daily ending balance of each denom for the given address
-function getBalanceQuery(address, { denom = null, from, to }) {
+function getBalanceQuery(address, { denom = null, from, to, startDate = '2019-01-01' }) {
   let where = `WHERE address = $1`
-  const params = [address, from, to]
+  const params = [address, from, to, startDate]
   if (denom) {
-    where += ' AND denom = $4'
+    where += ' AND denom = $5'
     params.push(denom)
   }
 
@@ -30,7 +30,7 @@ function getBalanceQuery(address, { denom = null, from, to }) {
         FROM daily_balances
         ${where}
       ) ends
-      WHERE day >= '2019-01-01' -- must be from start of all data to carry-forward values properly
+      WHERE day >= $4 -- must be from start of all data to carry-forward values properly
       AND day <= $3
       GROUP BY (time_bucket_gapfill('1 day', day), denom)
     ) filled
