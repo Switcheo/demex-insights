@@ -5,7 +5,8 @@ const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
 const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 const { getFeesQuery } = require('../../queries/trades');
-const { normalizedTimeParams } = require('../../helpers/time');
+const { normalizedTimeParams, today, daysAgo } = require('../../helpers/time');
+const { cachedFetch, RPC_BASE_URL } = require('../../helpers/fetch');
 
 module.exports = async function (fastify, opts) {
   fastify.get('/apr/:id', {
@@ -152,9 +153,9 @@ module.exports = async function (fastify, opts) {
 
         const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
-        const fees = toDateMap(feeRows)
-        const fundings = toDateMap(fundingRows)
-        const pnls = toDateMap(totalPNLRows)
+        const fees = toMap(feeRows, 'day')
+        const fundings = toMap(fundingRows, 'day')
+        const pnls = toMap(totalPNLRows, 'day')
 
         const upnl = await getOpenPositionUPnl(client, address)
 
@@ -188,14 +189,6 @@ module.exports = async function (fastify, opts) {
           required: ['id'],
           properties: {
             id: { type: 'string' }
-          },
-          additionalProperties: false
-        },
-        querystring: {
-          type: 'object',
-          properties: {
-            from: { type: 'string', format: 'date-time' },
-            to: { type: 'string', format: 'date-time' }
           },
           additionalProperties: false
         },
@@ -270,6 +263,147 @@ module.exports = async function (fastify, opts) {
         client.release()
       }
   })
+
+
+  // gets 7d, 14d, 30d apy and 24h volume for all perp / user pools
+  fastify.get('/stats', {
+     schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              stats: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['id', 'address', 'volume', 'aprs'],
+                  properties: {
+                    id: { type: 'string' },
+                    address: { type: 'string' },
+                    volume: {
+                      type: 'object',
+                      required: ['takerAmount', 'makerAmount', 'totalAmount'],
+                      properties: {
+                        takerAmount: { type: 'number' },
+                        makerAmount: { type: 'number' },
+                        totalAmount: { type: 'number' }
+                      },
+                      additionalProperties: false
+                    },
+                    aprs: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['timeframe', 'from', 'activeDays', 'to', 'initialPrice', 'finalPrice',  'apr'],
+                        properties: {
+                          timeframe: { type: 'number' },
+                          activeDays: { type: 'number' },
+                          from: { type: 'string', format: 'date-time' },
+                          to: { type: 'string', format: 'date-time' },
+                          initialPrice: { type: 'number' },
+                          finalPrice: { type: 'number' },
+                          apr: { type: 'number' },
+                        },
+                        additionalProperties: false
+                      }
+                    },
+                  },
+                }
+              }
+            },
+            additionalProperties: false
+          }
+        }
+      }
+  }, async function (request, reply) {
+      const client = await fastify.pg.connect()
+      // get all volume last 24 hr
+      const volumeQuery = `
+        WITH m AS (
+          SELECT
+            maker_address AS address,
+            SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount
+          FROM archived_trades
+          WHERE
+            block_created_at > NOW() - INTERVAL '24 hours'
+          GROUP BY maker_address
+        ), t AS (
+          SELECT
+            taker_address AS address,
+            SUM(quantity * price) * (10 ^ -18)::decimal AS taker_amount
+          FROM archived_trades
+          WHERE
+            block_created_at > NOW() - INTERVAL '24 hours'
+          GROUP BY taker_address
+        )
+        SELECT
+          COALESCE(m.address, t.address) AS address,
+          COALESCE(maker_amount, 0) AS maker_amount,
+          COALESCE(taker_amount, 0) AS taker_amount,
+          COALESCE(maker_amount, 0) + COALESCE(taker_amount, 0) AS total_amount
+        FROM
+          m FULL OUTER JOIN t ON m.address = t.address
+        ORDER BY address ASC;
+      `
+      const { rows: volumeRows } = await client.query(volumeQuery)
+      const volumes = toMap(volumeRows, 'address')
+
+      const pools = Array.from((await getPoolDenomsAndStartDates(client)).values())
+      const minStartDate = pools.reduce((min, item) =>  new Date(item.startDate) < new Date(min.startDate) ? item : min, pools[0]).startDate;
+      const addresses = pools.map(item => item.poolAddress)
+      const denoms = pools.map(item => item.poolDenom)
+
+      const to = today()
+      const from = daysAgo(30, to)
+      const [query, params] = getBalanceQuery(addresses, { denom: 'cgt/1', from, to, minStartDate })
+      const balanceQuery = `
+        SELECT
+          day,
+          address,
+          ending_balance * (10 ^ -18)::decimal AS ending_balance
+        FROM (
+          ${query}
+          ORDER BY address, day ASC
+        ) t;
+      `
+      const { rows: balanceRows } = await client.query(balanceQuery, params)
+      const balances = toMap(balanceRows, 'address', 'day')
+
+      const { rows: supplyRows } = await client.query(MultiSupplyQuery, [denoms])
+      const supplies = toMap(supplyRows, 'denom', 'day')
+
+      const results = []
+      for (const pool of pools) {
+        const { id, poolAddress: address, poolDenom: denom, startDate } = pool
+        const v = volumes[address]
+        const volume = { takerAmount: v?.taker_amount || '0', makerAmount: v?.maker_amount || '0', totalAmount: v?.total_amount || '0' }
+        const r = { id, address, volume, aprs: [] }
+
+        const timeframes = [30, 14, 7]
+        for (let days of timeframes) {
+          const upnl = await getOpenPositionUPnl(client, address)
+          const { finalPrice, finalDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, to, upnl)
+
+          // get the initial price and date by getting the final price from start of pool to start of timeframe
+          let startOfFrame = daysAgo(days, to)
+          if (startOfFrame < startDate) {
+            startOfFrame = startDate
+          }
+          const { finalPrice: initialPrice, finalDate: initialDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, startOfFrame, 0)
+
+          if (finalPrice) {
+            const activeDays = (finalDate - initialDate) / (1000 * 60 * 60 * 24)
+            const apr = (finalPrice - initialPrice) / initialPrice / days * 365
+
+            r.aprs.push({ timeframe: days, from: startOfFrame, to, activeDays, initialPrice, finalPrice, apr, ...r })
+          }
+        }
+
+        results.push(r)
+      }
+
+      return { stats: results }
+  })
 }
 
 const PerpsPoolVaultName = 'perps_pool_vault';
@@ -281,7 +415,7 @@ function addressHash(inputBytes) {
 }
 
 // Generates a Bech32-encoded address with dynamic prefix
-function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 'tswth')) {
+function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || `${process.env.CARBON_ENV === 'mainnet' ? '' : 't'}swth`)) {
   const input = Buffer.from(`${PerpsPoolVaultName}${poolId}`, 'utf8');
   const hashed = addressHash(input);
 
@@ -290,36 +424,161 @@ function generatePerpPoolAddress(poolId, prefix = (process.env.BECH32_PREFIX || 
   return bech32.encode(prefix, words);
 }
 
-function toDateMap(arr) {
+// Converts an array into a nested object with keys given by keyNames
+// e.g.
+// # toMap([{ id: 1, address: 'swth1', a: 1, b: 2 }], ['id', 'address'])
+// #  =>
+// # { 1: { 'swth1': { a: 1, b: 2 } }}
+function toMap(arr, ...keyNames) {
+  const keys = Array.from(keyNames)
   return arr.reduce((map, elem) => {
-    const d = elem.day.toISOString()
-    delete elem.day
-    map[d] = elem
-    return map
+    return rekey(map, elem, keys.slice())
   }, {})
 }
 
-async function getPoolDenomAndStartDate(client, id) {
-  let poolDenom = `cplt/${id}`
-  let startDate
-  const { rows } = await client.query(PoolStartDateQuery, [poolDenom])
-  if (!rows[0].day) {
-    poolDenom = `duvt/${id}`
-    const { rows: rows2 } = await client.query(PoolStartDateQuery, [poolDenom])
-    startDate = rows2[0].day
-  } else {
-    startDate = rows[0].day
+function rekey(map, elem, keys) {
+  const key = keys.shift()
+  if (!key) throw new Error('No map key provided')
+
+  let k = elem[key]
+  delete elem[key]
+  if (key === 'day') {
+    k = k.toISOString()
   }
-  return { poolDenom, startDate }
+
+  if (keys.length) {
+    map[k] ||= {}
+    rekey(map[k], elem, keys)
+  } else {
+    map[k] = elem
+  }
+
+  return map
+}
+
+function finalPriceAndDate(address, denom, balances, supplies, start, end, upnl) {
+  const b = balances[address], s = supplies[denom]
+
+  let date = new Date(end)
+  let lastBalance, lastSupply, finalDate = undefined
+
+  while (date >= start && b && s) {
+    lastSupply = s[date.toISOString()]
+    lastBalance ||= b[date.toISOString()]
+
+    if (lastSupply && lastBalance === undefined) {
+      throw new Error('Found a date with supply but no balance row')
+    }
+
+    if (lastBalance) {
+      finalDate ||= date
+    }
+
+    if (lastBalance && lastSupply && lastSupply.ending_total_supply !== '0') {
+      return { finalPrice: (parseFloat(lastBalance.ending_balance) + upnl) / parseFloat(lastSupply.ending_total_supply), finalDate }
+    }
+
+    date = daysAgo(1, date)
+  }
+
+  return { finalPrice: undefined, finalDate }
+}
+
+function initialPriceAndDate(address, denom, balances, supplies, start, end) {
+  const b = balances[address], s = supplies[denom];
+  let date = new Date(start)
+
+  let firstBalance, firstSupply, initialDate = undefined
+  while (date <= end && b && s) {
+    firstSupply = s[date.toISOString()]
+    firstBalance ||= b[date.toISOString()]
+
+    if (firstBalance && firstSupply && supply.ending_total_supply !== '0') {
+      return { initialPrice: (parseFloat(balance.ending_balance)) / parseFloat(supply.ending_total_supply), initialDate: date }
+    }
+
+    date = daysAgo(-1, date)
+  }
+  return { initialPrice: undefined, initialDate: date }
+}
+
+async function getPoolDenomAndStartDate(client, id) {
+  const res = POOL_CACHE.get(id)
+  if (!res) {
+    await getPoolDenomsAndStartDates(client)
+  }
+  return POOL_CACHE.get(id)
+}
+
+const FETCH_CACHE = new Map()
+const POOL_CACHE = new Map()
+async function getPoolDenomsAndStartDates(client) {
+  const result = await cachedFetch(FETCH_CACHE, fetchAllPoolDenoms)
+  const { rows } = await client.query(PoolStartDateQuery, [Array.from(result.values())])
+  for (const row of rows) {
+    const id = row['denom'].split('/')[1]
+    POOL_CACHE.set(id, { id, poolDenom: row['denom'], poolAddress: generatePerpPoolAddress(id), startDate: row['day'] } )
+  }
+  return POOL_CACHE
+}
+
+async function fetchAllPoolDenoms(cache) {
+  const response = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/pools/pool_info?limit=5000`);
+  if (!response.ok) {
+    throw new Error(`HTTP fetch error! status: ${response.status}`);
+  }
+
+  const response2 = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/user_vaults_info?limit=5000`);
+  if (!response2.ok) {
+    throw new Error(`HTTP fetch error! status: ${response.status}`);
+  }
+
+  const json = await response.json();
+  const json2 = await response2.json();
+
+  for (const item of json['vaults']) {
+    cache.set(item['id'], `cplt/${item['id']}`)
+  }
+  for (const item of json2['vaults']) {
+    cache.set(item['id'], `duvt/${item['id']}`)
+  }
+
+  return cache
 }
 
 const PoolStartDateQuery = `
   SELECT
+    denom,
     MIN(day) as day
   FROM daily_balances
-  WHERE denom = $1;
+  WHERE denom = ANY($1)
+  GROUP BY denom;
 `
 
+// no gapfilling
+const MultiSupplyQuery = `
+  SELECT
+    day,
+    denom,
+    total_daily_delta,
+    SUM(total_daily_delta) OVER (
+      PARTITION BY denom
+      ORDER BY day
+    ) AS ending_total_supply
+  FROM (
+    SELECT
+      day,
+      denom,
+      SUM(daily_delta) AS total_daily_delta
+    FROM daily_balances
+    WHERE denom = ANY($1)
+    GROUP BY day, denom
+    ORDER BY day, denom
+  ) ends
+  ORDER BY denom, day;
+`
+
+// has gapfilling
 const SupplyQuery = `
   SELECT
     day,

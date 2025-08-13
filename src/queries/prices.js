@@ -1,10 +1,9 @@
 'use strict'
 
+const { RPC_BASE_URL, HYDROGEN_BASE_URL, cachedFetch } = require('../helpers/fetch');
+
 const PRICE_CACHE = new Map()
 const MARKET_CACHE = new Map()
-
-const RPC_BASE_URL = process.env.NODE_BASE_URL || 'https://test-api.carbon.network'
-const HYDROGEN_BASE_URL = process.env.HYDROGEN_BASE_URL || 'https://test-hydrogen-api.carbon.network'
 
 async function getTokenPrices() {
   return cachedFetch(PRICE_CACHE, fetchTokenPrices)
@@ -27,8 +26,6 @@ async function fetchTokenPrices(cache) {
     cache.set(item['denom'], { price: item['price_usd'], decimals: item['decimals'] })
   }
 
-  cache.set('__last_hydrate_time__', (new Date()).getTime())
-
   return cache
 }
 
@@ -45,30 +42,7 @@ async function fetchMarketPrices(cache) {
     cache.set(item['market_id'], item['mark'])
   }
 
-  cache.set('__last_hydrate_time__', (new Date()).getTime())
-
   return cache
-}
-
-async function cachedFetch(cache, fetch) {
-  const hydrated_at = cache.get('__last_hydrate_time__')
-  if (!!hydrated_at) {
-    // cache available
-    if (hydrated_at + 1*60*1000 < (new Date()).getTime()) {
-      // rehydrate every 1 minute
-      console.info("Rehydrating cache..")
-      fetch(cache)
-    }
-    // use cache
-    return cache
-  }
-
-  try {
-    console.warn("No token price cache available, loading now..")
-    return fetch(cache)
-  } catch (error) {
-    console.error('Fetch error:', error);
-  }
 }
 
 module.exports = {
