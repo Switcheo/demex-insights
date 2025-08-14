@@ -606,12 +606,36 @@ const SupplyQuery = `
 `
 
 const FundingQuery = `
+  WITH p AS (
+    SELECT
+      *
+    FROM archived_positions
+    WHERE archived_positions.updated_block_height >= (
+      SELECT MIN(block_height) AS min_height
+      FROM blocks
+      WHERE blocks.time >= NOW() - INTERVAL '31 days'
+    )
+    AND address = $1
+  ),
+  f AS (
+    SELECT
+      p.address,
+      p.market,
+      p.update_reason,
+      p.lots,
+      time_bucket(INTERVAL '1 day', b.time) AS day,
+      realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.address, p.market ORDER BY p.updated_block_height ASC) AS rpnl_delta
+    FROM p
+    JOIN blocks b ON b.block_height = p.updated_block_height
+  )
   SELECT
-    day,
-    SUM(funding) AS funding
-  FROM
-    daily_funding
-  WHERE address = $1 AND day >= $2 AND day <= $3
-  GROUP BY address, day
-  ORDER BY day ASC;
+    f.address,
+    f.day,
+    SUM(f.lots) as lots,
+    SUM(f.rpnl_delta) * -(10 ^ -18) as funding -- inverse as +ve pnl is a rebate, and we want to show payments
+  FROM f
+  WHERE f.update_reason = 6 -- AND f.rpnl_delta < 0
+  AND f.day >= $2 AND f.day <= $3
+  GROUP BY f.address, f.day
+  ORDER BY f.day DESC;
 `
