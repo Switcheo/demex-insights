@@ -523,12 +523,12 @@ async function getPoolDenomsAndStartDates(client) {
 }
 
 async function fetchAllPoolDenoms(cache) {
-  const response = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/pools/pool_info?limit=5000`);
+  const response = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/pools/pool_info?pagination.limit=5000`);
   if (!response.ok) {
     throw new Error(`HTTP fetch error! status: ${response.status}`);
   }
 
-  const response2 = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/user_vaults_info?limit=5000`);
+  const response2 = await fetch(`${RPC_BASE_URL}/carbon/perpspool/v1/user_vaults_info?pagination.limit=5000`);
   if (!response2.ok) {
     throw new Error(`HTTP fetch error! status: ${response.status}`);
   }
