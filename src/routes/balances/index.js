@@ -49,7 +49,7 @@ module.exports = async function (fastify, opts) {
       const client = await fastify.pg.connect()
       try {
         const { from, to } = normalizedTimeParams(request.query)
-        const [query, params] = getBalanceQuery(request.params.address, { from, to })
+        const [query, params] = getBalanceQuery([request.params.address], { from, to })
         const sortedQuery = `
           ${query}
           ORDER BY day ASC, denom ASC;
@@ -110,7 +110,7 @@ module.exports = async function (fastify, opts) {
         const prices = await getTokenPrices()
         const values = Array.from(prices.entries()).map(([denom, value]) => `('${denom}', ${value?.price || 0}, ${value?.decimals || 18})`).join(', ');
 
-        const [query, params] = getBalanceQuery(request.params.address, { from, to })
+        const [query, params] = getBalanceQuery([request.params.address], { from, to })
         const valueQuery = `
           WITH
             prices(denom, price, decimals) AS (VALUES ${values}),

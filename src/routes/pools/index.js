@@ -57,7 +57,7 @@ module.exports = async function (fastify, opts) {
           throw new Error(`Cannot find pool with id: ${id} and denom: ${poolDenom}`)
         }
 
-        const [query, params] = getBalanceQuery(address, { denom: 'cgt/1', from, to, startDate })
+        const [query, params] = getBalanceQuery([address], { denom: 'cgt/1', from, to, startDate })
         const sortedQuery = `
           SELECT
             day,
@@ -355,7 +355,7 @@ module.exports = async function (fastify, opts) {
 
       const to = today()
       const from = daysAgo(30, to)
-      const [query, params] = getBalanceQuery(addresses, { denom: 'cgt/1', from, to, minStartDate })
+      const [query, params] = getBalanceQuery([addresses], { denom: 'cgt/1', from, to, minStartDate })
       const balanceQuery = `
         SELECT
           day,
