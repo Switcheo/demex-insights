@@ -484,24 +484,6 @@ function finalPriceAndDate(address, denom, balances, supplies, start, end, upnl)
   return { finalPrice: undefined, finalDate }
 }
 
-function initialPriceAndDate(address, denom, balances, supplies, start, end) {
-  const b = balances[address], s = supplies[denom];
-  let date = new Date(start)
-
-  let firstBalance, firstSupply, initialDate = undefined
-  while (date <= end && b && s) {
-    firstSupply = s[date.toISOString()]
-    firstBalance ||= b[date.toISOString()]
-
-    if (firstBalance && firstSupply && supply.ending_total_supply !== '0') {
-      return { initialPrice: (parseFloat(balance.ending_balance)) / parseFloat(supply.ending_total_supply), initialDate: date }
-    }
-
-    date = daysAgo(-1, date)
-  }
-  return { initialPrice: undefined, initialDate: date }
-}
-
 async function getPoolDenomAndStartDate(client, id) {
   const res = POOL_CACHE.get(id)
   if (!res) {
@@ -634,7 +616,7 @@ const FundingQuery = `
     SUM(f.lots) as lots,
     SUM(f.rpnl_delta) * -(10 ^ -18) as funding -- inverse as +ve pnl is a rebate, and we want to show payments
   FROM f
-  WHERE f.update_reason = 6 -- AND f.rpnl_delta < 0
+  WHERE f.update_reason = 6
   AND f.day >= $2 AND f.day <= $3
   GROUP BY f.address, f.day
   ORDER BY f.day DESC;
