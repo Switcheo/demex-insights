@@ -54,7 +54,7 @@ module.exports = async function (fastify, opts) {
       const min = daysAgo(30)
       const start = from < min ? min : from
       const end = to < from ? today() : to
-      const marketID = `cmkt/${id}`
+      const marketID = Number.isNaN(parseInt(id, 10)) ? id : `cmkt/${id}`
       const { rows } = await client.query(FundingQuery, [marketID, start, end])
 
       const markPriceRaw = prices.get(marketID)
