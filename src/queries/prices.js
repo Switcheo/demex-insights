@@ -30,7 +30,7 @@ async function fetchTokenPrices(cache) {
 }
 
 async function fetchMarketPrices(cache) {
-  const response = await fetch(`${RPC_BASE_URL}/carbon/pricing/v1/prices`);
+  const response = await fetch(`${RPC_BASE_URL}/carbon/pricing/v1/prices?pagination.limit=5000`);
 
   if (!response.ok) {
     throw new Error(`HTTP fetch error! status: ${response.status}`);
