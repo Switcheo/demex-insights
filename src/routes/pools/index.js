@@ -317,92 +317,96 @@ module.exports = async function (fastify, opts) {
       }
   }, async function (request, reply) {
       const client = await fastify.pg.connect()
-      // get all volume last 24 hr
-      const volumeQuery = `
-        WITH m AS (
+      try {
+        // get all volume last 24 hr
+        const volumeQuery = `
+          WITH m AS (
+            SELECT
+              maker_address AS address,
+              SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount
+            FROM archived_trades
+            WHERE
+              block_created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY maker_address
+          ), t AS (
+            SELECT
+              taker_address AS address,
+              SUM(quantity * price) * (10 ^ -18)::decimal AS taker_amount
+            FROM archived_trades
+            WHERE
+              block_created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY taker_address
+          )
           SELECT
-            maker_address AS address,
-            SUM(quantity * price) * (10 ^ -18)::decimal AS maker_amount
-          FROM archived_trades
-          WHERE
-            block_created_at > NOW() - INTERVAL '24 hours'
-          GROUP BY maker_address
-        ), t AS (
+            COALESCE(m.address, t.address) AS address,
+            COALESCE(maker_amount, 0) AS maker_amount,
+            COALESCE(taker_amount, 0) AS taker_amount,
+            COALESCE(maker_amount, 0) + COALESCE(taker_amount, 0) AS total_amount
+          FROM
+            m FULL OUTER JOIN t ON m.address = t.address
+          ORDER BY address ASC;
+        `
+        const { rows: volumeRows } = await client.query(volumeQuery)
+        const volumes = toMap(volumeRows, 'address')
+
+        const pools = Array.from((await getPoolDenomsAndStartDates(client)).values())
+        const minStartDate = pools.reduce((min, item) =>  new Date(item.startDate) < new Date(min.startDate) ? item : min, pools[0]).startDate;
+        const addresses = pools.map(item => item.poolAddress)
+        const denoms = pools.map(item => item.poolDenom)
+
+        const to = today()
+        const from = daysAgo(30, to)
+        const [query, params] = getBalanceQuery([addresses], { denom: 'cgt/1', from, to, minStartDate })
+        const balanceQuery = `
           SELECT
-            taker_address AS address,
-            SUM(quantity * price) * (10 ^ -18)::decimal AS taker_amount
-          FROM archived_trades
-          WHERE
-            block_created_at > NOW() - INTERVAL '24 hours'
-          GROUP BY taker_address
-        )
-        SELECT
-          COALESCE(m.address, t.address) AS address,
-          COALESCE(maker_amount, 0) AS maker_amount,
-          COALESCE(taker_amount, 0) AS taker_amount,
-          COALESCE(maker_amount, 0) + COALESCE(taker_amount, 0) AS total_amount
-        FROM
-          m FULL OUTER JOIN t ON m.address = t.address
-        ORDER BY address ASC;
-      `
-      const { rows: volumeRows } = await client.query(volumeQuery)
-      const volumes = toMap(volumeRows, 'address')
+            day,
+            address,
+            ending_balance * (10 ^ -18)::decimal AS ending_balance
+          FROM (
+            ${query}
+            ORDER BY address, day ASC
+          ) t;
+        `
+        const { rows: balanceRows } = await client.query(balanceQuery, params)
+        const balances = toMap(balanceRows, 'address', 'day')
 
-      const pools = Array.from((await getPoolDenomsAndStartDates(client)).values())
-      const minStartDate = pools.reduce((min, item) =>  new Date(item.startDate) < new Date(min.startDate) ? item : min, pools[0]).startDate;
-      const addresses = pools.map(item => item.poolAddress)
-      const denoms = pools.map(item => item.poolDenom)
+        const { rows: supplyRows } = await client.query(MultiSupplyQuery, [denoms])
+        const supplies = toMap(supplyRows, 'denom', 'day')
 
-      const to = today()
-      const from = daysAgo(30, to)
-      const [query, params] = getBalanceQuery([addresses], { denom: 'cgt/1', from, to, minStartDate })
-      const balanceQuery = `
-        SELECT
-          day,
-          address,
-          ending_balance * (10 ^ -18)::decimal AS ending_balance
-        FROM (
-          ${query}
-          ORDER BY address, day ASC
-        ) t;
-      `
-      const { rows: balanceRows } = await client.query(balanceQuery, params)
-      const balances = toMap(balanceRows, 'address', 'day')
+        const results = []
+        for (const pool of pools) {
+          const { id, poolAddress: address, poolDenom: denom, startDate } = pool
+          const v = volumes[address]
+          const volume = { takerAmount: v?.taker_amount || '0', makerAmount: v?.maker_amount || '0', totalAmount: v?.total_amount || '0' }
+          const r = { id, address, volume, aprs: [] }
 
-      const { rows: supplyRows } = await client.query(MultiSupplyQuery, [denoms])
-      const supplies = toMap(supplyRows, 'denom', 'day')
+          const timeframes = [30, 14, 7]
+          for (let days of timeframes) {
+            const upnl = await getOpenPositionUPnl(client, address)
+            const { finalPrice, finalDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, to, upnl)
 
-      const results = []
-      for (const pool of pools) {
-        const { id, poolAddress: address, poolDenom: denom, startDate } = pool
-        const v = volumes[address]
-        const volume = { takerAmount: v?.taker_amount || '0', makerAmount: v?.maker_amount || '0', totalAmount: v?.total_amount || '0' }
-        const r = { id, address, volume, aprs: [] }
+            // get the initial price and date by getting the final price from start of pool to start of timeframe
+            let startOfFrame = daysAgo(days, to)
+            if (startOfFrame < startDate) {
+              startOfFrame = startDate
+            }
+            const { finalPrice: initialPrice, finalDate: initialDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, startOfFrame, 0)
 
-        const timeframes = [30, 14, 7]
-        for (let days of timeframes) {
-          const upnl = await getOpenPositionUPnl(client, address)
-          const { finalPrice, finalDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, to, upnl)
+            if (finalPrice) {
+              const activeDays = (finalDate - initialDate) / (1000 * 60 * 60 * 24)
+              const apr = (finalPrice - initialPrice) / initialPrice / days * 365
 
-          // get the initial price and date by getting the final price from start of pool to start of timeframe
-          let startOfFrame = daysAgo(days, to)
-          if (startOfFrame < startDate) {
-            startOfFrame = startDate
+              r.aprs.push({ timeframe: days, from: startOfFrame, to, activeDays, initialPrice, finalPrice, apr, ...r })
+            }
           }
-          const { finalPrice: initialPrice, finalDate: initialDate } = finalPriceAndDate(address, denom, balances, supplies, startDate, startOfFrame, 0)
 
-          if (finalPrice) {
-            const activeDays = (finalDate - initialDate) / (1000 * 60 * 60 * 24)
-            const apr = (finalPrice - initialPrice) / initialPrice / days * 365
-
-            r.aprs.push({ timeframe: days, from: startOfFrame, to, activeDays, initialPrice, finalPrice, apr, ...r })
-          }
+          results.push(r)
         }
 
-        results.push(r)
+        return { stats: results }
+      } finally {
+        client.release()
       }
-
-      return { stats: results }
   })
 }
 
