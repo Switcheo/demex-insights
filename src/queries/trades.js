@@ -65,8 +65,43 @@ function getFeesQuery(address, { denom = null, from, to }) {
   return [query, params]
 }
 
+const getFundingQuery = (byMarket = false, bucketInterval = 'day') => `
+  WITH p AS (
+    SELECT
+      *
+    FROM archived_positions
+    WHERE archived_positions.updated_block_height >= (
+      SELECT MIN(block_height) AS min_height
+      FROM blocks
+      WHERE blocks.time >= GREATEST($2, (NOW() - INTERVAL '91 days'))
+    )
+    AND address = $1
+  ),
+  f AS (
+    SELECT
+      p.address,
+      p.market,
+      p.update_reason,
+      p.lots,
+      time_bucket(INTERVAL '1 ${bucketInterval}', b.time) AS time,
+      realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.address, p.market ORDER BY p.updated_block_height ASC) AS rpnl_delta
+    FROM p
+    JOIN blocks b ON b.block_height = p.updated_block_height
+  )
+  SELECT
+    f.time,
+    ${byMarket ? ' f.market, ' : ''}
+    SUM(f.rpnl_delta) * -(10 ^ -18) as amount -- inverse as +ve pnl is a rebate, and we want to show payment amounts
+  FROM f
+  WHERE f.update_reason = 6
+  AND f.time >= $2 AND f.time <= $3
+  GROUP BY f.time ${byMarket ? ', f.market' : ''}
+  ORDER BY f.time DESC ${byMarket ? ', f.market ASC' : ''};
+`
+
 module.exports = {
   getFeesQuery,
+  getFundingQuery
 }
 
 

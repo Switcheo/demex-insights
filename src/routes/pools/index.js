@@ -4,7 +4,7 @@ const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
 const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
-const { getFeesQuery } = require('../../queries/trades');
+const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { normalizedTimeParams, today, daysAgo } = require('../../helpers/time');
 const { cachedFetch, RPC_BASE_URL } = require('../../helpers/fetch');
 
@@ -147,14 +147,14 @@ module.exports = async function (fastify, opts) {
 
         const [feeQuery, feeParams] = getFeesQuery(address, { denom, from, to })
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
-        const { rows: fundingRows } = await client.query(FundingQuery, [address, from, to])
+        const { rows: fundingRows } = await client.query(getFundingQuery(), [address, from, to])
         const { rows: supplyRows } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
         const { rows: totalPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
 
         const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
         const fees = toMap(feeRows, 'day')
-        const fundings = toMap(fundingRows, 'day')
+        const fundings = toMap(fundingRows, 'time')
         const pnls = toMap(totalPNLRows, 'day')
 
         const upnl = await getOpenPositionUPnl(client, address)
@@ -167,7 +167,7 @@ module.exports = async function (fastify, opts) {
         for (let i = 1; i < dates.length; ++i) {
           const day = dates[i]
           const isLast = i === dates.length - 1
-          const funding = parseFloat(fundings[day]?.funding || 0)
+          const funding = parseFloat(fundings[day]?.amount || 0)
           const totalPNL = parseFloat(pnls[day]?.rpnl || 0)
           const makerFee = parseFloat(fees[day]?.maker_fee || 0)
           const takerFee = parseFloat(fees[day]?.taker_fee || 0)
@@ -442,7 +442,7 @@ function rekey(map, elem, keys) {
 
   let k = elem[key]
   delete elem[key]
-  if (key === 'day') {
+  if (key === 'day' || key === 'time') {
     k = k.toISOString()
   }
 
@@ -585,39 +585,4 @@ const SupplyQuery = `
   ) filled
   WHERE day >= $2
   ORDER BY day ASC;
-`
-
-const FundingQuery = `
-  WITH p AS (
-    SELECT
-      *
-    FROM archived_positions
-    WHERE archived_positions.updated_block_height >= (
-      SELECT MIN(block_height) AS min_height
-      FROM blocks
-      WHERE blocks.time >= NOW() - INTERVAL '31 days'
-    )
-    AND address = $1
-  ),
-  f AS (
-    SELECT
-      p.address,
-      p.market,
-      p.update_reason,
-      p.lots,
-      time_bucket(INTERVAL '1 day', b.time) AS day,
-      realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.address, p.market ORDER BY p.updated_block_height ASC) AS rpnl_delta
-    FROM p
-    JOIN blocks b ON b.block_height = p.updated_block_height
-  )
-  SELECT
-    f.address,
-    f.day,
-    SUM(f.lots) as lots,
-    SUM(f.rpnl_delta) * -(10 ^ -18) as funding -- inverse as +ve pnl is a rebate, and we want to show payments
-  FROM f
-  WHERE f.update_reason = 6
-  AND f.day >= $2 AND f.day <= $3
-  GROUP BY f.address, f.day
-  ORDER BY f.day DESC;
 `

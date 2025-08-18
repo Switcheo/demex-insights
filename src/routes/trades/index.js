@@ -1,9 +1,10 @@
 const { normalizedTimeParams, daysAgo } = require('../../helpers/time');
-const { getFeesQuery } = require('../../queries/trades');
+const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 
-module.exports = async function (fastify, opts) {
+const ONE_DAY = 24 * 60 * 60 * 1000
 
+module.exports = async function (fastify, opts) {
   fastify.get('/perps_pnl/:address', {
       schema: {
         params: {
@@ -211,12 +212,25 @@ module.exports = async function (fastify, opts) {
               type: 'array',
               items: {
                 type: 'object',
+                required: ['day', 'denom',
+                  'taker_fee', 'taker_fee_kickback', 'taker_fee_commission',
+                  'maker_fee', 'maker_fee_kickback', 'maker_fee_commission',
+                  'total_fee', 'total_fee_kickback', 'total_fee_commission'
+                ],
                 properties: {
                   day: { type: 'string', format: 'date-time' },
                   denom: { type: 'string' },
-                  // TODO: add others
+                  taker_fee: { type: 'number' },
+                  taker_fee_kickback: { type: 'number' },
+                  taker_fee_commission: { type: 'number' },
+                  maker_fee: { type: 'number' },
+                  maker_fee_kickback: { type: 'number' },
+                  maker_fee_commission: { type: 'number' },
+                  total_fee: { type: 'number' },
+                  total_fee_kickback: { type: 'number' },
+                  total_fee_commission: { type: 'number' },
                 },
-                // additionalProperties: false
+                additionalProperties: false
               }
             }
           }
@@ -235,6 +249,67 @@ module.exports = async function (fastify, opts) {
         const { rows } = await client.query(query, params)
 
         return { address, from, to, fees: rows }
+      } finally {
+        client.release()
+      }
+  })
+
+
+  fastify.get('/funding/:address', {
+    schema: {
+      params: {
+        type: 'object',
+        required: ['address'],
+        properties: {
+          address: { type: 'string' }
+        },
+        additionalProperties: false
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', format: 'date-time' },
+          to: { type: 'string', format: 'date-time' },
+          denom: { type: 'string' }
+        },
+        additionalProperties: false
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            address: { type: 'string' },
+            from: { type: 'string', format: 'date-time' },
+            to: { type: 'string', format: 'date-time' },
+            funding: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['market', 'amount'],
+                properties: {
+                  time: { type: 'string', format: 'date-time' },
+                  market: { type: 'string' },
+                  amount: { type: 'string' },
+                },
+                additionalProperties: false
+              }
+            }
+          }
+        }
+      }
+    }
+  }, async function (request, reply) {
+      const client = await fastify.pg.connect()
+      try {
+        const { address } = request.params
+        const { from, to } = normalizedTimeParams(request.query)
+
+        const bucket = (to.getTime() - from.getTime()) <= ONE_DAY ? 'hour' : 'day'
+        const query = getFundingQuery(true, bucket)
+
+        const { rows } = await client.query(query, [address, from, to])
+
+        return { address, from, to, funding: rows }
       } finally {
         client.release()
       }
