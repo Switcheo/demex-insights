@@ -71,7 +71,7 @@ module.exports = async function (fastify, opts) {
           }
           filled.push({ day: row.day.toISOString(), pnl: (Number(row.rpnl) + upnl).toString() })
         } else {
-          upnl.push({ day: daysAgo(0).toISOString(), pnl: upnl.toString() })
+          filled.push({ day: daysAgo(0).toISOString(), pnl: upnl.toString() })
         }
 
         return { address, from, to, pnls: filled }
