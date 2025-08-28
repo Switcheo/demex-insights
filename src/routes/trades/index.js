@@ -1,5 +1,5 @@
 const { normalizedTimeParams, daysAgo } = require('../../helpers/time');
-const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
+const { getVolumeQuery, getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
 
 const ONE_DAY = 24 * 60 * 60 * 1000
@@ -80,11 +80,10 @@ module.exports = async function (fastify, opts) {
       }
   })
 
-  fastify.get('/volume/:address', {
+  fastify.get('/volume/:address?', {
       schema: {
         params: {
           type: 'object',
-          required: ['address'],
           properties: {
             address: { type: 'string' }
           },
@@ -113,6 +112,7 @@ module.exports = async function (fastify, opts) {
                   required: ['day', 'maker_amount', 'taker_amount', 'total_amount'],
                   properties: {
                     day: { type: 'string', format: 'date-time' },
+                    address: { type: 'string' },
                     maker_amount: { type: 'string' },
                     taker_amount: { type: 'string' },
                     total_amount: { type: 'string' },
@@ -132,49 +132,8 @@ module.exports = async function (fastify, opts) {
         const { address } = request.params
         const denom = request.query.denom
         const { from, to } = normalizedTimeParams(request.query)
-
-        const query = `
-          SELECT
-            day,
-            ${denom ? '' : 'volumes.denom,'}
-            maker_amount * (10 ^ -decimals)::decimal AS maker_amount,
-            taker_amount * (10 ^ -decimals)::decimal AS taker_amount,
-            total_amount * (10 ^ -decimals)::decimal AS total_amount
-          FROM
-          (
-            SELECT
-              day,
-              value_denom AS denom,
-              SUM(maker_total_value) AS maker_amount,
-              SUM(taker_total_value) AS taker_amount,
-              SUM(maker_total_value) + SUM(taker_total_value) AS total_amount
-            FROM
-              (
-                  SELECT
-                    day,
-                    total_value AS taker_total_value,
-                    0 AS maker_total_value,
-                    value_denom
-                  FROM daily_taker_summary WHERE address = $1 AND day >= $2 AND day <= $3 ${denom ? 'AND value_denom = $4' : ''}
-                  UNION
-                  SELECT
-                    day,
-                    0 AS taker_total_value,
-                    total_value AS maker_total_value,
-                    value_denom
-                  FROM daily_maker_summary WHERE address = $1 AND day >= $2 AND day <= $3 ${denom ? 'AND value_denom = $4' : ''}
-              ) daily_summary
-            GROUP BY day, value_denom
-            ORDER BY day DESC, value_denom ASC
-          ) volumes
-          LEFT JOIN tokens ON tokens.denom = volumes.denom;
-        `
-
-        const params = [address, from, to]
-        if (denom) params.push(denom)
-
+        const [query, params] = getVolumeQuery({ address, from, to, denom })
         const { rows } = await client.query(query, params)
-
         return { address, from, to, volume: rows }
       } finally {
         client.release()
@@ -182,11 +141,10 @@ module.exports = async function (fastify, opts) {
     }
   )
 
-  fastify.get('/fees/:address', {
+  fastify.get('/fees/:address?', {
     schema: {
       params: {
         type: 'object',
-        required: ['address'],
         properties: {
           address: { type: 'string' }
         },
@@ -212,12 +170,13 @@ module.exports = async function (fastify, opts) {
               type: 'array',
               items: {
                 type: 'object',
-                required: ['day', 'denom',
+                required: ['day',
                   'taker_fee', 'taker_fee_kickback', 'taker_fee_commission',
                   'maker_fee', 'maker_fee_kickback', 'maker_fee_commission',
                   'total_fee', 'total_fee_kickback', 'total_fee_commission'
                 ],
                 properties: {
+                  address: { type: 'string' },
                   day: { type: 'string', format: 'date-time' },
                   denom: { type: 'string' },
                   taker_fee: { type: 'number' },
@@ -244,7 +203,7 @@ module.exports = async function (fastify, opts) {
         const { denom } = request.query
         const { from, to } = normalizedTimeParams(request.query)
 
-        const [query, params] = getFeesQuery(request.params.address, { denom, from, to })
+        const [query, params] = getFeesQuery({ address, denom, from, to })
 
         const { rows } = await client.query(query, params)
 
