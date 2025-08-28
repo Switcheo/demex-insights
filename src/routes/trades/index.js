@@ -136,7 +136,7 @@ module.exports = async function (fastify, opts) {
         const query = `
           SELECT
             day,
-            ${denom ? '' : 'denom,'}
+            ${denom ? '' : 'volumes.denom,'}
             maker_amount * (10 ^ -decimals)::decimal AS maker_amount,
             taker_amount * (10 ^ -decimals)::decimal AS taker_amount,
             total_amount * (10 ^ -decimals)::decimal AS total_amount
@@ -170,7 +170,7 @@ module.exports = async function (fastify, opts) {
           LEFT JOIN tokens ON tokens.denom = volumes.denom;
         `
 
-        const params = [, from, to]
+        const params = [address, from, to]
         if (denom) params.push(denom)
 
         const { rows } = await client.query(query, params)
