@@ -1,6 +1,6 @@
 const { normalizedTimeParams, daysAgo } = require('../../helpers/time');
 const { getVolumeQuery, getFeesQuery, getFundingQuery } = require('../../queries/trades');
-const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
+const { getOpenPositionUPnl, getTotalRPNLQuery } = require('../../queries/positions');
 
 const ONE_DAY = 24 * 60 * 60 * 1000
 
@@ -18,6 +18,7 @@ module.exports = async function (fastify, opts) {
         querystring: {
           type: 'object',
           properties: {
+            market: { type: 'string' },
             from: { type: 'string', format: 'date-time' },
             to: { type: 'string', format: 'date-time' },
           },
@@ -26,6 +27,7 @@ module.exports = async function (fastify, opts) {
         response: {
           200: {
             type: 'object',
+            required: ['address', 'from', 'to', 'pnls'],
             properties: {
               address: { type: 'string' },
               from: { type: 'string', format: 'date-time' },
@@ -50,9 +52,11 @@ module.exports = async function (fastify, opts) {
      const client = await fastify.pg.connect()
       try {
         const { address } = request.params
+        const { market } = request.query
         const { from, to } = normalizedTimeParams(request.query)
 
-        const { rows } = await client.query(TotalRPNLQuery, [address, from, to])
+        const [query, params] = getTotalRPNLQuery({ address, market, from, to })
+        const { rows } = await client.query(query, params)
         const upnl = await getOpenPositionUPnl(client, address)
 
         // gapfill
@@ -229,7 +233,7 @@ module.exports = async function (fastify, opts) {
         properties: {
           from: { type: 'string', format: 'date-time' },
           to: { type: 'string', format: 'date-time' },
-          denom: { type: 'string' }
+          denom: { type: 'string' },
         },
         additionalProperties: false
       },

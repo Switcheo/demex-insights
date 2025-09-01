@@ -3,7 +3,7 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getOpenPositionUPnl, TotalRPNLQuery } = require('../../queries/positions');
+const { getOpenPositionUPnl, getTotalRPNLQuery } = require('../../queries/positions');
 const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { normalizedTimeParams, today, daysAgo } = require('../../helpers/time');
 const { cachedFetch, RPC_BASE_URL } = require('../../helpers/fetch');
@@ -146,10 +146,11 @@ module.exports = async function (fastify, opts) {
         }
 
         const [feeQuery, feeParams] = getFeesQuery(address, { denom, from, to })
+        const [rpnlQuery, rpnlParams] = getTotalRPNLQuery({ address, from, to })
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: fundingRows } = await client.query(getFundingQuery(), [address, from, to])
         const { rows: supplyRows } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
-        const { rows: totalPNLRows } = await client.query(TotalRPNLQuery, [address, from, to])
+        const { rows: totalPNLRows } = await client.query(rpnlQuery, rpnlParams)
 
         const firstDateIdx = supplyRows.findIndex(r => r.ending_total_supply !== '0')
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
