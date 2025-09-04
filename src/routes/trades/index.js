@@ -84,11 +84,15 @@ module.exports = async function (fastify, opts) {
             date.setUTCDate(date.getUTCDate() + 1)
           }
         }
-        // handle final row by adding upnl
-        if (filled.length > 0) {
-          filled[filled.length-1].pnl = filled[filled.length-1].pnl + upnl
-        } else {
-          filled.push({ time: to.toISOString(), pnl: upnl.toString() })
+
+        // handle upnl
+        if (!request.query.to) {
+          // no end date, so assume we are handling open positions, and add upnl to the final row
+          if (filled.length > 0) {
+            filled[filled.length-1].pnl = filled[filled.length-1].pnl + upnl
+          } else {
+            filled.push({ time: to.toISOString(), pnl: upnl.toString() })
+          }
         }
 
         return { address, market, from, to, pnls: filled }
