@@ -1,8 +1,6 @@
-const { normalizedTimeParams, daysAgo } = require('../../helpers/time');
+const { withinOneDay, normalizedTimeParams, daysAgo } = require('../../helpers/time');
 const { getVolumeQuery, getFeesQuery, getFundingQuery } = require('../../queries/trades');
-const { getOpenPositionUPnl, getTotalRPNLQuery } = require('../../queries/positions');
-
-const ONE_DAY = 24 * 60 * 60 * 1000
+const { getOpenPositionUPnl, getRPNLQuery } = require('../../queries/positions');
 
 module.exports = async function (fastify, opts) {
   fastify.get('/perps_pnl/:address', {
@@ -37,9 +35,9 @@ module.exports = async function (fastify, opts) {
                 type: 'array',
                 items: {
                   type: 'object',
-                  required: ['day', 'pnl'],
+                  required: ['time', 'pnl'],
                   properties: {
-                    day: { type: 'string', format: 'date-time' },
+                    time: { type: 'string', format: 'date-time' },
                     pnl: { type: 'number' },
                   },
                   additionalProperties: false
@@ -55,28 +53,42 @@ module.exports = async function (fastify, opts) {
         const { address } = request.params
         const { market } = request.query
         const { from, to } = normalizedTimeParams(request.query)
+        const isHourly = withinOneDay(from, to)
 
-        const [query, params] = getTotalRPNLQuery({ address, market, from, to })
+        const [query, params] = getRPNLQuery({ address, market, from, to })
         const { rows } = await client.query(query, params)
-        const upnl = await getOpenPositionUPnl(client, address)
+        const upnl = await getOpenPositionUPnl(client, address, market)
+
+        // start cursor
+        const date = new Date(from)
+        if (isHourly) {
+          date.setUTCMinutes(0, 0, 0); // round down to the previous hour
+        } else {
+          date.setUTCHours(0, 0, 0, 0); // round down to the previous day
+        }
 
         // gapfill
-        const date = new Date(from)
         const filled = []
-        if (rows.length > 0) {
-          let row = rows.shift()
-          while (rows.length) {
-            if (new Date(row.day).getTime() === date.getTime()) {
-              filled.push({ day: row.day.toISOString(), pnl: row.rpnl })
-              row = rows.shift()
-            } else {
-              filled.push({ day: date.toISOString(), pnl: 0 })
-            }
-            date.setDate(date.getDate() + 1)
+        let row
+        while (date.getTime() <= to.getTime()) {
+          if (!row) row = rows.shift()
+          if (row && new Date(row.time).getTime() === date.getTime()) {
+            filled.push({ time: row.time.toISOString(), pnl: row.rpnl })
+            row = undefined
+          } else {
+            filled.push({ time: date.toISOString(), pnl: 0 })
           }
-          filled.push({ day: row.day.toISOString(), pnl: (Number(row.rpnl) + upnl).toString() })
+          if (isHourly) {
+            date.setUTCHours(date.getUTCHours() + 1)
+          } else {
+            date.setUTCDate(date.getUTCDate() + 1)
+          }
+        }
+        // handle final row by adding upnl
+        if (filled.length > 0) {
+          filled[filled.length-1].pnl = filled[filled.length-1].pnl + upnl
         } else {
-          filled.push({ day: daysAgo(0).toISOString(), pnl: upnl.toString() })
+          filled.push({ time: to.toISOString(), pnl: upnl.toString() })
         }
 
         return { address, market, from, to, pnls: filled }
@@ -268,7 +280,7 @@ module.exports = async function (fastify, opts) {
         const { address } = request.params
         const { from, to } = normalizedTimeParams(request.query)
 
-        const bucket = (to.getTime() - from.getTime()) <= ONE_DAY ? 'hour' : 'day'
+        const bucket = withinOneDay(from, to) ? 'hour' : 'day'
         const query = getFundingQuery(true, bucket)
 
         const { rows } = await client.query(query, [address, from, to])

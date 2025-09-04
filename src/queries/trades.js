@@ -1,5 +1,7 @@
 'use strict'
 
+const { getConstrainedPositionsCTE } = require('./positions');
+
 function getVolumeQuery({ address = null, denom = null, from, to }) {
   const params = [from, to]
   if (denom) params.push(denom)
@@ -45,7 +47,6 @@ function getVolumeQuery({ address = null, denom = null, from, to }) {
     ) volumes
     LEFT JOIN tokens ON tokens.denom = volumes.denom;
   `
-  console.log(query)
 
   return [query, params]
 }
@@ -117,42 +118,13 @@ function getFeesQuery({ address = null, denom = null, from, to }) {
     LEFT JOIN tokens ON tokens.denom = fees.denom;
   `
 
+  console.log(params)
+
   return [query, params]
 }
 
 const getFundingQuery = (byMarket = false, bucketInterval = 'day') => `
-  WITH min_b AS (
-    SELECT MIN(block_height) AS min_height
-    FROM blocks
-    WHERE blocks.time >= $2
-    AND blocks.time <= $2::TIMESTAMPTZ + INTERVAL '1 day' -- extra constrain to find correct hypertable chunk
-  ),
-  max_b AS (
-    SELECT MAX(block_height) AS max_height
-    FROM blocks
-    WHERE blocks.time <= $3::TIMESTAMPTZ + INTERVAL '1 day' -- as above, but inversed as the timebucket is aligned left (so we find the max block as "to" -> "to+1day")
-    AND blocks.time >= $3::TIMESTAMPTZ - INTERVAL '1 hour' -- give some buffer in case user puts in exact time and the latest block has not occured yet (i.e. "to-1hr" -> "to+1day")
-  ),
-  p AS (
-    SELECT
-      *
-    FROM archived_positions
-    WHERE address = $1
-    AND archived_positions.opened_block_height >= (SELECT min_height FROM min_b)
-    AND archived_positions.updated_block_height <= (SELECT max_height FROM max_b)
-  ),
-  f AS (
-    SELECT
-      p.market,
-      p.update_reason,
-      p.lots,
-      b.time AS timestamp,
-      COALESCE(realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.market, p.opened_block_height ORDER BY p.updated_block_height ASC), realized_pnl) AS rpnl_delta
-    FROM p
-    JOIN blocks b ON b.block_height = p.updated_block_height
-    AND b.block_height >= (SELECT min_height FROM min_b) -- constrain hypertable chunks
-    AND b.block_height <= (SELECT max_height FROM max_b)
-  )
+  ${getConstrainedPositionsCTE()}
   SELECT
     time_bucket(INTERVAL '1 ${bucketInterval}', timestamp) AS time,
     ${byMarket ? ' f.market, ' : ''}

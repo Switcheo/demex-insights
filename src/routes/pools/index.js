@@ -3,7 +3,7 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getOpenPositionUPnl, getTotalRPNLQuery } = require('../../queries/positions');
+const { getOpenPositionUPnl, getRPNLQuery } = require('../../queries/positions');
 const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { normalizedTimeParams, today, daysAgo } = require('../../helpers/time');
 const { cachedFetch, RPC_BASE_URL } = require('../../helpers/fetch');
@@ -120,7 +120,7 @@ module.exports = async function (fastify, opts) {
         const { denom, from, to } = request.query
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
 
-        const [query, params] = getFeesQuery(address, { denom, from, to })
+        const [query, params] = getFeesQuery({ address, denom, from, to })
 
         const { rows } = await client.query(query, params)
 
@@ -145,8 +145,8 @@ module.exports = async function (fastify, opts) {
           throw new Error(`Cannot find pool with id: ${id} and denom: ${poolDenom}`)
         }
 
-        const [feeQuery, feeParams] = getFeesQuery(address, { denom, from, to })
-        const [rpnlQuery, rpnlParams] = getTotalRPNLQuery({ address, from, to })
+        const [feeQuery, feeParams] = getFeesQuery({ address, denom, from, to })
+        const [rpnlQuery, rpnlParams] = getRPNLQuery({ address, from, to })
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: fundingRows } = await client.query(getFundingQuery(), [address, from, to])
         const { rows: supplyRows } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
@@ -156,7 +156,9 @@ module.exports = async function (fastify, opts) {
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
         const fees = toMap(feeRows, 'day')
         const fundings = toMap(fundingRows, 'time')
-        const pnls = toMap(totalPNLRows, 'day')
+        const pnls = toMap(totalPNLRows, 'time')
+
+        console.log({feeRows, feeQuery, feeParams, from, to})
 
         const upnl = await getOpenPositionUPnl(client, address)
 

@@ -1,5 +1,11 @@
 'use strict'
 
+const ONE_DAY = 24 * 60 * 60 * 1000
+
+function withinOneDay(from, to) {
+  return (to.getTime() - from.getTime()) <= ONE_DAY
+}
+
 function daysAgo(days = 7, from = today()) {
   const ago = new Date(from)
   ago.setDate(new Date(from).getDate() - days)
@@ -27,8 +33,10 @@ function normalizedTimeParams(query, fromOffset = 0) {
 }
 
 module.exports = {
+  ONE_DAY,
+  withinOneDay,
   daysAgo,
   today,
   removeTime,
-  normalizedTimeParams
+  normalizedTimeParams,
 }
