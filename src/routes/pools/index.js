@@ -3,7 +3,7 @@
 const { bech32 } = require('bech32');
 const { createHash } = require('crypto');
 const { getBalanceQuery } = require('../../queries/balances');
-const { getOpenPositionUPnl, getRPNLQuery } = require('../../queries/positions');
+const { getOpenPositionUPnl, getDailyRPNLQuery } = require('../../queries/positions');
 const { getFeesQuery, getFundingQuery } = require('../../queries/trades');
 const { normalizedTimeParams, today, daysAgo } = require('../../helpers/time');
 const { cachedFetch, RPC_BASE_URL } = require('../../helpers/fetch');
@@ -136,7 +136,7 @@ module.exports = async function (fastify, opts) {
      const client = await fastify.pg.connect()
       try {
         const { id } = request.params
-        const { from, to } = normalizedTimeParams(request.query, 1)
+        const { from: f, to } = normalizedTimeParams(request.query, 1)
 
         const denom = 'cgt/1'
         const address = generatePerpPoolAddress(id) // TODO: handle spot?
@@ -144,9 +144,10 @@ module.exports = async function (fastify, opts) {
         if (!startDate) {
           throw new Error(`Cannot find pool with id: ${id} and denom: ${poolDenom}`)
         }
+        const from = f.getTime() < startDate ? f : startDate
 
         const [feeQuery, feeParams] = getFeesQuery({ address, denom, from, to })
-        const [rpnlQuery, rpnlParams] = getRPNLQuery({ address, from, to })
+        const [rpnlQuery, rpnlParams] = getDailyRPNLQuery({ address, from, to })
         const { rows: feeRows } = await client.query(feeQuery, feeParams)
         const { rows: fundingRows } = await client.query(getFundingQuery(), [address, from, to])
         const { rows: supplyRows } = await client.query(SupplyQuery, [poolDenom, from, to, startDate])
@@ -156,7 +157,7 @@ module.exports = async function (fastify, opts) {
         const dates = supplyRows.map(elem => elem.day.toISOString()).slice(firstDateIdx)
         const fees = toMap(feeRows, 'day')
         const fundings = toMap(fundingRows, 'time')
-        const pnls = toMap(totalPNLRows, 'time')
+        const pnls = toMap(totalPNLRows, 'day')
 
         const upnl = await getOpenPositionUPnl(client, address)
 

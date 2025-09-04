@@ -46,6 +46,54 @@ async function getOpenPositionUPnl(client, address, market = null) {
   return upnl
 }
 
+// getDailyRPNLQuery is unable to get pnl for specific positions, but is very fast
+// use getRPNLQuery to get hourly / daily pnl for specific positions.
+function getDailyRPNLQuery({ address, market = null, from, to }) {
+  const params = [address, from, to]
+  if (market) {
+    params.push(market)
+  }
+
+  const query = `
+    WITH h AS (
+      SELECT
+        f.hour,
+        f.address,
+        ${market ? '' : 'f.market,'}
+        CASE
+          WHEN p.closed_block_height = 0 THEN
+            -- since we are using snapshots, minus of the previous rpnl which has either been closed and accounted for in 'hourly_closed_rpnl',
+            -- or is being carried to this current open position which we should net off from previous snapshot
+            p.realized_pnl - LEAD(p.realized_pnl, 1, 0) OVER (PARTITION BY f.address, f.market ORDER BY f.hour DESC)
+          ELSE 0 -- if this is a closed position, it is already fully accounted for in 'hourly_closed_rpnl' below
+        END AS rpnl
+      FROM hourly_final_position_ids f
+      JOIN archived_positions p ON p.id = f.id
+      WHERE f.address = $1
+      AND f.hour >= $2 AND f.hour <= $3
+      ${market ? 'AND f.market = $4' : ''}
+    ),
+    j AS (
+      SELECT
+        h.hour,
+        SUM(COALESCE(c.total_realized_pnl, 0)) + SUM(COALESCE(h.rpnl, 0)) AS rpnl
+      FROM h
+      LEFT OUTER JOIN hourly_closed_rpnl c ON c.hour = h.hour AND c.address = h.address
+      GROUP BY h.hour
+    )
+    SELECT
+      time_bucket('1 day', j.hour) AS day,
+      SUM(j.rpnl) * (10 ^ -18)::decimal AS rpnl
+    FROM j
+    GROUP BY day
+    ORDER BY day ASC;
+  `
+
+  return [query, params]
+}
+
+// getRPNLQuery gets rpnl delta for an address (and optionally market),
+// but can be slow for very large timeframes.
 const getRPNLQuery = ({ address, market = null, from, to }) => {
   const bucketInterval = withinOneDay(from, to) ? 'hour' : 'day'
 
@@ -55,7 +103,7 @@ const getRPNLQuery = ({ address, market = null, from, to }) => {
   }
 
   const query = `
-    ${getConstrainedPositionsCTE({ filterSpecificMarket: market !== null })}
+    ${getConstrainedPositionsCTE({ filterSpecificMarket: !!market })}
     SELECT
       time_bucket(INTERVAL '1 ${bucketInterval}', timestamp) AS time,
       SUM(f.rpnl_delta) * (10 ^ -18) as rpnl
@@ -115,5 +163,6 @@ const getConstrainedPositionsCTE = ({ filterSpecificMarket = false } = {}) => {
 module.exports = {
   getOpenPositionUPnl,
   getRPNLQuery,
+  getDailyRPNLQuery,
   getConstrainedPositionsCTE,
 }
