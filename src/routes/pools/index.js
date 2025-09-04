@@ -158,8 +158,6 @@ module.exports = async function (fastify, opts) {
         const fundings = toMap(fundingRows, 'time')
         const pnls = toMap(totalPNLRows, 'time')
 
-        console.log({feeRows, feeQuery, feeParams, from, to})
-
         const upnl = await getOpenPositionUPnl(client, address)
 
         if (dates.length < 2) {

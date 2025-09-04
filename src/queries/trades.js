@@ -118,8 +118,6 @@ function getFeesQuery({ address = null, denom = null, from, to }) {
     LEFT JOIN tokens ON tokens.denom = fees.denom;
   `
 
-  console.log(params)
-
   return [query, params]
 }
 
