@@ -78,7 +78,7 @@ module.exports = async function (fastify, opts) {
           filled.push({ day: daysAgo(0).toISOString(), pnl: upnl.toString() })
         }
 
-        return { address, from, to, pnls: filled }
+        return { address, market, from, to, pnls: filled }
       } finally {
         client.release()
       }

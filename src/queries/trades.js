@@ -121,37 +121,49 @@ function getFeesQuery({ address = null, denom = null, from, to }) {
 }
 
 const getFundingQuery = (byMarket = false, bucketInterval = 'day') => `
-  WITH p AS (
+  WITH min_b AS (
+    SELECT MIN(block_height) AS min_height
+    FROM blocks
+    WHERE blocks.time >= $2
+    AND blocks.time <= $2::TIMESTAMPTZ + INTERVAL '1 day' -- extra constrain to find correct hypertable chunk
+  ),
+  max_b AS (
+    SELECT MAX(block_height) AS max_height
+    FROM blocks
+    WHERE blocks.time <= $3::TIMESTAMPTZ + INTERVAL '1 day' -- as above, but inversed as the timebucket is aligned left (so we find the max block as "to" -> "to+1day")
+    AND blocks.time >= $3::TIMESTAMPTZ - INTERVAL '1 hour' -- give some buffer in case user puts in exact time and the latest block has not occured yet (i.e. "to-1hr" -> "to+1day")
+  ),
+  p AS (
     SELECT
       *
     FROM archived_positions
-    WHERE archived_positions.updated_block_height >= (
-      SELECT MIN(block_height) AS min_height
-      FROM blocks
-      WHERE blocks.time >= GREATEST($2, (NOW() - INTERVAL '91 days'))
-    )
-    AND address = $1
+    WHERE address = $1
+    AND archived_positions.opened_block_height >= (SELECT min_height FROM min_b)
+    AND archived_positions.updated_block_height <= (SELECT max_height FROM max_b)
   ),
   f AS (
     SELECT
-      p.address,
       p.market,
       p.update_reason,
       p.lots,
-      time_bucket(INTERVAL '1 ${bucketInterval}', b.time) AS time,
-      realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.address, p.market ORDER BY p.updated_block_height ASC) AS rpnl_delta
+      b.time AS timestamp,
+      COALESCE(realized_pnl - LAG(realized_pnl) OVER (PARTITION BY p.market, p.opened_block_height ORDER BY p.updated_block_height ASC), realized_pnl) AS rpnl_delta
     FROM p
     JOIN blocks b ON b.block_height = p.updated_block_height
+    AND b.block_height >= (SELECT min_height FROM min_b) -- constrain hypertable chunks
+    AND b.block_height <= (SELECT max_height FROM max_b)
   )
   SELECT
-    f.time,
+    time_bucket(INTERVAL '1 ${bucketInterval}', timestamp) AS time,
     ${byMarket ? ' f.market, ' : ''}
     SUM(f.rpnl_delta) * -(10 ^ -18) as amount -- inverse as +ve pnl is a rebate, and we want to show payment amounts
   FROM f
   WHERE f.update_reason = 6
-  AND f.time >= $2 AND f.time <= $3
-  GROUP BY f.time ${byMarket ? ', f.market' : ''}
-  ORDER BY f.time DESC ${byMarket ? ', f.market ASC' : ''};
+  AND timestamp >= $2 -- this is repeated because data may contain entries outside of the relevant bucket (but is needed due to usage of LAG above)
+  AND time_bucket(INTERVAL '1 ${bucketInterval}', timestamp) >= $2 -- this is needed because block filter is not precise
+  AND time_bucket(INTERVAL '1 ${bucketInterval}', timestamp) <= $3 -- as above
+  GROUP BY time ${byMarket ? ', f.market' : ''}
+  ORDER BY time DESC ${byMarket ? ', f.market ASC' : ''};
 `
 
 module.exports = {
